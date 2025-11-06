@@ -1,0 +1,62 @@
+{
+	"pages": [
+		{
+			"path": "pages/login/index",
+			"style": {
+				"navigationStyle": "custom",
+				"navigationBarTitleText": "登录"
+			}
+		},
+		{
+			"path": "pages/home/index",
+			"style": {
+				"navigationBarTitleText": "首页",
+				"navigationBarBackgroundColor": "#FFFFFF",
+				"navigationBarTextStyle": "black"
+			}
+		},
+		{
+			"path": "pages/chat/chatList",
+			"style": {
+				"navigationBarTitleText": "我的消息",
+				"navigationBarBackgroundColor": "#FFFFFF",
+				"navigationBarTextStyle": "black"
+			}
+		},
+		{
+			"path": "pages/chat/customerService",
+			"style": {
+				"navigationBarTitleText": "客户咨询",
+				"navigationBarBackgroundColor": "#FFFFFF",
+				"navigationBarTextStyle": "black"
+			}
+		}
+	],
+	"globalStyle": {
+		"navigationBarTextStyle": "black",
+		"navigationBarTitleText": "客服系统",
+		"navigationBarBackgroundColor": "#FFFFFF",
+		"backgroundColor": "#f8f8f8"
+	},
+	"tabBar": {
+		"color": "#C0C4CC",
+		"selectedColor": "#409EFF",
+		"borderStyle": "black",
+		"backgroundColor": "#ffffff",
+		"list": [
+			{
+				"pagePath": "pages/home/index",
+				"text": "首页",
+				"iconPath": "static/tab-home.png",
+				"selectedIconPath": "static/tab-home-current.png"
+			},
+			{
+				"pagePath": "pages/chat/chatList",
+				"text": "消息",
+				"iconPath": "static/tab-message.svg",
+				"selectedIconPath": "static/tab-message-current.svg"
+			}
+		]
+	}
+}
+
