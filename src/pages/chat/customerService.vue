@@ -244,6 +244,15 @@ export default {
             }).exec();
         } catch (err) { }
     },
+    onShow() {
+        // 每次页面显示时，强制滚动到最底部
+        // 用户退出聊天窗口后再次进入，应该看到最新消息
+        this.$nextTick(() => {
+            setTimeout(() => {
+                this.scrollToLatest(true);
+            }, 100);
+        });
+    },
     computed: {
         // finalRealDisplayMessages: 从MessageDisplayManager.visibleMessages读取（无状态）
         // 所有消息（包括临时消息）都在MessageDisplayManager中管理，Vue组件只负责展示
