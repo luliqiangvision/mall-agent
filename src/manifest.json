@@ -111,7 +111,7 @@
         },
         "domain" : "localhost",
         "router" : {
-            "base" : ""
+            "base" : "/agent-frontend/"
         },
         "uniStatistics" : {
             "enable" : true
