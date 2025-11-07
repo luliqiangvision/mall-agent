@@ -275,9 +275,16 @@ export default {
     },
     watch: {
         // 消息变化后，重新评估是否需要显示"点击加载更多"
+        // 消息变化后，重新评估是否需要显示"点击加载更多"，并重新观察消息元素（用于已读标记）
         finalRealDisplayMessages: {
             handler() {
-                this.$nextTick(() => this.updateScrollableStatus());
+                this.$nextTick(() => {
+                    this.updateScrollableStatus();
+                    // 消息更新后，重新观察消息元素（用于已读标记）
+                    if (this.intersectionObserver) {
+                        this.observeMessages();
+                    }
+                });
             },
             deep: true
         }
@@ -488,6 +495,14 @@ export default {
         // 观察所有消息元素
         observeMessages() {
             if (!this.intersectionObserver) return;
+            // 先断开所有观察，避免重复观察
+            this.intersectionObserver.disconnect();
+
+            // 重新创建观察器（因为 disconnect 后需要重新创建才能继续观察）
+            this.intersectionObserver = uni.createIntersectionObserver(this, {
+                thresholds: [0, 1.0], // 触发阈值：元素进入和离开可视区时都触发
+                initialRatio: 0 // 初始时不可见
+            });
 
             this.finalRealDisplayMessages.forEach((message, index) => {
                 // 使用安全的ID生成函数，确保选择器有效
