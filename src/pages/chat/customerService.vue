@@ -3,7 +3,7 @@
         <view class="header">
             <image v-if="shopInfo && shopInfo.shopIcon" class="shop-icon" :src="shopInfo.shopIcon" mode="aspectFill">
             </image>
-            <text class="title">{{ shopInfo && shopInfo.shopName ? shopInfo.shopName : '' }}</text>
+            <text class="title">{{ getDisplayShopName() }}</text>
         </view>
 
         <!-- 悬浮商品卡片 -->
@@ -555,6 +555,25 @@ export default {
             } else {
                 myLog('error', 'Failed to mark message as read', { serverMsgId: message.serverMsgId, result });
             }
+        },
+
+        // 获取显示用的店铺名称（拼接 conversationId 后十位，与聊天列表保持一致）
+        getDisplayShopName() {
+            if (!this.shopInfo || !this.shopInfo.shopName) {
+                return '';
+            }
+            
+            const shopName = this.shopInfo.shopName;
+            if (this.conversationId) {
+                // 获取 conversationId 的后十位
+                const conversationIdStr = String(this.conversationId);
+                const lastTenDigits = conversationIdStr.length >= 10 
+                    ? conversationIdStr.slice(-10) 
+                    : conversationIdStr;
+                return `${shopName}${lastTenDigits}`;
+            }
+            
+            return shopName;
         },
 
         // 格式化消息时间
