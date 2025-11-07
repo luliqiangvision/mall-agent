@@ -73,9 +73,8 @@ function loadProfileConfig() {
 const profileConfig = loadProfileConfig()
 
 export default defineConfig({
-  // 使用根路径,也就是绝对路径,网关的静态资源插件处理好了非文件的请求会转向index.html,其他路径也自行调整了,不需要担心404,
-  // TODO 换掉hash路由(也就是history路由,需要维护后端的请求防止出现404,网关之前开发的静态资源管理歪打正着提前处理了这个问题),这个影响爬虫seo 
-  base: '/',
+  // 设置基础路径为 /agent-frontend/，所有静态资源路径会自动加上这个前缀
+  base: '/agent-frontend/',
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
