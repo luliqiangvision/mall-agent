@@ -376,9 +376,9 @@ export default {
                 const tempHttpManager = new ChatHttpManager();
                 const result = await tempHttpManager.checkConversationByShopId(userId, this.shopId);
 
-                // requestUtil 返回的是 CommonResult，数据结构：{ code, message, data }
-                // data 是 ConversationCheckResponse：{ hasConversation, conversationId, clientMaxServerMsgId, shop }
-                const data = result.data;
+                // requestUtil 返回的是 CommonResult 的 data（已由拦截器剥离）
+                // result 现在直接是 ConversationCheckResponse：{ hasConversation, conversationId, clientMaxServerMsgId, shop }
+                const data = result;
                 myLog('debug', '预检响应数据', { hasData: !!data, hasShop: !!(data && data.shop) });
 
                 // 保存店铺信息（用于header显示）
