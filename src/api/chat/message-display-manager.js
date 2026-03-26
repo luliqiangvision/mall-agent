@@ -349,20 +349,21 @@ class MessageDisplayManager {
       
       // 发起HTTP补漏请求
       const missingResult = await this.requestMissingMessages(newMessages)
-      
-      if (missingResult.data.hasMissingMessages && missingResult.data.missingMessages.length > 0) {
+
+      // missingResult 现在直接是接口返回的数据对象（而非 {data: ...} 包装）
+      if (missingResult && missingResult.hasMissingMessages && Array.isArray(missingResult.missingMessages) && missingResult.missingMessages.length > 0) {
         // 有补漏消息：安全合并显示（避免重复）
-        const mergedMessages = this.safeMergeMessages(missingResult.data.missingMessages, newMessages)
+        const mergedMessages = this.safeMergeMessages(missingResult.missingMessages, newMessages)
         this.displayMessages(mergedMessages)
-        
+
         myLog('info', 'Missing messages recovered', {
-          missingCount: missingResult.data.missingCount,
+          missingCount: missingResult.missingCount,
           totalCount: mergedMessages.length
         })
       } else {
         // 无补漏消息：直接显示新消息
         this.displayMessages(newMessages)
-        
+
         myLog('info', 'No missing messages found, displaying new messages')
       }
     } catch (error) {

@@ -70,14 +70,12 @@ const store = createStore({
       const username = userInfo.username.trim()
       return new Promise((resolve, reject) => {
         login(username, userInfo.password).then(response => {
-          // 新的接口响应格式：CommonResult<Map<String, String>>
-          // response 已经是 CommonResult 对象（因为响应拦截器返回了 response.data）
-          // response.data 包含 { token: "xxx", tokenHead: "Bearer " }
-          const tokenData = response.data || {}
-          
+          // 现在响应拦截器返回的是 data（{ token, tokenHead }）
+          const tokenData = response || {}
+
           if (!tokenData.token) {
             myLog('error', '登录响应中缺少 token', response)
-            reject(new Error(response.message || '登录失败：未获取到 token'))
+            reject(new Error(tokenData.errorMessage || '登录失败：未获取到 token'))
             return
           }
           
@@ -95,10 +93,9 @@ const store = createStore({
           commit('setToken', tokenStr)
           
           // 登录接口只返回 token，需要调用 /agent/info 接口获取用户信息
-          // 新的接口响应格式：CommonResult<Map<String, Object>>
-          // response.data 包含 { agentId, agentName, icon, menus, roles }
+          // getInfo() 返回的是 data（用户信息对象）
           getInfo().then(infoResponse => {
-            const userInfoData = infoResponse.data || infoResponse
+            const userInfoData = infoResponse || {}
             
             // 根据新的接口格式，返回的数据包含：
             // - agentId: 客服ID（重要字段，用于后续业务逻辑）
@@ -153,10 +150,9 @@ const store = createStore({
     // 获取用户信息
     GetInfo({ commit, state }) {
       return new Promise((resolve, reject) => {
-        getInfo().then(response => {
-          // 新的接口响应格式：CommonResult<Map<String, Object>>
-          // response.data 包含 { agentId, agentName, icon, menus, roles }
-          const data = response.data || response
+      getInfo().then(response => {
+          // getInfo() 返回的是 data（用户信息对象）
+          const data = response || {}
           
           // 根据新的接口格式：
           // - agentId: 客服ID（重要字段）

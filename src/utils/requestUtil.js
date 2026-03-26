@@ -45,27 +45,36 @@ http.interceptor.request((config, cancel) => { /* 请求之前拦截器 */
 })
 
 http.interceptor.response((response) => { /* 请求之后拦截器 */
-  const res = response.data
-  if (res.code !== 200) {
-    // 提示错误信息
-      uni.showToast({
-        title: res.message,
+  const res = response.data || {}
+
+  // 严格只接受 JsonResult 风格：{ success, data, errorCode, errorMessage }
+  if (res.success === undefined) {
+    myLog('error', 'Invalid response format: missing `success` field', { url: response.config?.url, statusCode: response.statusCode })
+    uni.showToast({
+      title: '响应格式错误',
       duration: 1500,
-      })
-    // 401未登录处理
-    if (res.code === 401) {
+    })
+    return Promise.reject(response)
+  }
+
+  if (!res.success) {
+    uni.showToast({
+      title: res.errorMessage || '请求失败',
+      duration: 1500,
+    })
+    // 401 未登录处理
+    if (res.errorCode === '401' || response.statusCode === 401) {
       uni.showModal({
         title: '提示',
         content: '你已被登出，可以取消继续留在该页面，或者重新登录',
         confirmText: '重新登录',
         cancelText: '取消',
-        success(res) {
-          if (res.confirm) {
+        success(resModal) {
+          if (resModal.confirm) {
             uni.reLaunch({
               url: '/pages/login/index',
             })
-          }
-          else if (res.cancel) {
+          } else if (resModal.cancel) {
             myLog('info', '用户点击取消')
           }
         },
@@ -73,14 +82,13 @@ http.interceptor.response((response) => { /* 请求之后拦截器 */
     }
     return Promise.reject(response)
   }
-  else {
-    return response.data
-  }
+
+  return res.data
 }, (response) => {
   // 提示错误信息
   myLog('info', 'response error', response)
   uni.showToast({
-    title: response.errMsg,
+    title: response.errMsg || '请求失败',
     duration: 1500,
   })
   return Promise.reject(response)

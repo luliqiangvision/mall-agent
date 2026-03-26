@@ -36,24 +36,26 @@ class Http2RequestUtil {
       return config
     })
     
-    // 响应拦截器：统一处理响应数据格式
+    // 响应拦截器：严格按照新的 JsonResult 格式处理 { success, data, errorCode, errorMessage }
     this.addResponseInterceptor((response) => {
-      // 如果返回的数据格式是 { code, message, data }
-      if (response && response.data && response.data.code !== undefined) {
-        const res = response.data
-        
-        // 统一错误处理
-        if (res.code !== 200) {
-          myLog('warn', 'HTTP/2.0 response error:', { code: res.code, message: res.message })
-          
-          // 提示错误信息
+      if (!response) return response
+
+      const payload = response.data || {}
+
+      // 要求服务端必须返回 JsonResult 风格的 success 字段
+      if (payload && payload.success !== undefined) {
+        const successFlag = Boolean(payload.success)
+
+        if (!successFlag) {
+          myLog('warn', 'HTTP/2.0 response business error:', { errorCode: payload.errorCode, errorMessage: payload.errorMessage })
+
           uni.showToast({
-            title: res.message || '请求失败',
+            title: payload.errorMessage || '请求失败',
             duration: 1500
           })
-          
-          // 401未登录处理
-          if (res.code === 401) {
+
+          // 鉴权异常处理（后端也可能通过 HTTP 状态码表达）
+          if (response.statusCode === 401 || payload.errorCode === '401') {
             uni.showModal({
               title: '提示',
               content: '你已被登出，可以取消继续留在该页面，或者重新登录',
@@ -68,19 +70,21 @@ class Http2RequestUtil {
               }
             })
           }
-          
-          throw new Error(res.message || 'Request failed')
+
+          throw new Error(payload.errorMessage || 'Request failed')
         }
-        
+
         // 返回标准化数据
         return {
           success: true,
-          data: res.data,
+          data: payload.data,
           statusCode: response.statusCode
         }
       }
-      
-      return response
+
+      // 严格模式：没有 success 字段视为格式错误
+      myLog('error', 'HTTP/2.0 response missing required `success` field', { url: response.url, statusCode: response.statusCode })
+      throw new Error('Invalid response format: missing `success` field')
     })
     
     // 错误拦截器：统一错误处理
@@ -270,17 +274,34 @@ class Http2RequestUtil {
       }
 
       const result = await response.json()
-      
+
       myLog('debug', 'HTTP/2.0 request successful', { status: response.status })
-      
-      const responseObj = {
-        success: true,
-        data: result,
-        statusCode: response.status
+
+      // 严格接受 JsonResult 并返回其中的 data（不再包一层）
+      if (!result || result.success === undefined) {
+        myLog('error', 'Invalid JSON response format from server (expected JsonResult)', { url, status: response.status })
+        throw new Error('Invalid response format')
       }
-      
-      // 应用响应拦截器
-      return this.applyResponseInterceptors(responseObj)
+
+      if (!result.success) {
+        uni.showToast({ title: result.errorMessage || '请求失败', duration: 1500 })
+        if (response.status === 401 || result.errorCode === '401') {
+          uni.showModal({
+            title: '提示',
+            content: '你已被登出，可以取消继续留在该页面，或者重新登录',
+            confirmText: '重新登录',
+            cancelText: '取消',
+            success(res) {
+              if (res.confirm) {
+                uni.reLaunch({ url })
+              }
+            }
+          })
+        }
+        throw new Error(result.errorMessage || 'Request failed')
+      }
+
+      return result.data
     } catch (error) {
       myLog('error', 'HTTP/2.0 fetch request failed', error)
       
@@ -325,14 +346,31 @@ class Http2RequestUtil {
       })
 
       if (response.statusCode === 200) {
-        const responseObj = {
-          success: true,
-          data: response.data,
-          statusCode: response.statusCode
+        const res = response.data || {}
+        if (!res || res.success === undefined) {
+          myLog('error', 'Invalid JSON response format from server (expected JsonResult)', { url, statusCode: response.statusCode })
+          throw new Error('Invalid response format')
         }
-        
-        // 应用响应拦截器
-        return this.applyResponseInterceptors(responseObj)
+
+        if (!res.success) {
+          uni.showToast({ title: res.errorMessage || '请求失败', duration: 1500 })
+          if (response.statusCode === 401 || res.errorCode === '401') {
+            uni.showModal({
+              title: '提示',
+              content: '你已被登出，可以取消继续留在该页面，或者重新登录',
+              confirmText: '重新登录',
+              cancelText: '取消',
+              success(resModal) {
+                if (resModal.confirm) {
+                  uni.reLaunch({ url })
+                }
+              }
+            })
+          }
+          throw new Error(res.errorMessage || 'Request failed')
+        }
+
+        return res.data
       } else {
         throw new Error(`Request failed with status code: ${response.statusCode}`)
       }
@@ -377,14 +415,18 @@ class Http2RequestUtil {
       })
 
       if (response.statusCode === 200) {
-        const responseObj = {
-          success: true,
-          data: response.data,
-          statusCode: response.statusCode
+        const res = response.data || {}
+        if (!res || res.success === undefined) {
+          myLog('error', 'Invalid JSON response format from server (expected JsonResult)', { url, statusCode: response.statusCode })
+          throw new Error('Invalid response format')
         }
-        
-        // 应用响应拦截器
-        return this.applyResponseInterceptors(responseObj)
+
+        if (!res.success) {
+          uni.showToast({ title: res.errorMessage || '请求失败', duration: 1500 })
+          throw new Error(res.errorMessage || 'Request failed')
+        }
+
+        return res.data
       } else {
         throw new Error(`Request failed with status code: ${response.statusCode}`)
       }

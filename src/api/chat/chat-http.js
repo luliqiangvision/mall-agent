@@ -82,10 +82,10 @@ class ChatHttpManager {
         method: 'GET',
         data: params
       })
+      
+      if (response) {
+        const result = response
 
-      if (response && response.data) {
-        const result = response.data
-        
         return {
           success: true,
           hasExistingConversation: result.hasExistingConversation || false,
@@ -130,10 +130,9 @@ class ChatHttpManager {
         method: 'POST',
         data: params
       })
+      if (response) {
+        const result = response
 
-      if (response && response.data) {
-        const result = response.data
-        
         // 直接使用原始消息数据，不格式化（保留 fromUserId 等所有字段）
         if (result.chatMessages && Array.isArray(result.chatMessages)) {
           const responseData = {
@@ -185,10 +184,9 @@ class ChatHttpManager {
         method: 'GET',
         data: params
       })
+      if (response) {
+        const result = response
 
-      if (response && response.data) {
-        const result = response.data
-        
         // 直接使用原始消息数据，不格式化（保留 fromUserId 等所有字段）
         if (result.messages && Array.isArray(result.messages)) {
           return {
@@ -228,11 +226,10 @@ class ChatHttpManager {
         method: 'GET',
         data: { conversationId: conversationId || this.conversationId }
       })
-
-      if (response && response.data) {
+      if (response) {
         return {
           success: true,
-          conversation: response.data
+          conversation: response
         }
       } else {
         throw new Error('Invalid response: missing data')
@@ -268,11 +265,10 @@ class ChatHttpManager {
         method: 'POST',
         data: data
       })
-
-      if (response && response.data) {
+      if (response) {
         const result = {
           success: true,
-          conversations: response.data || {}
+          conversations: response || {}
         }
 
         // 调用消息渲染回调
@@ -424,22 +420,21 @@ class ChatHttpManager {
       })
       
       myLog('debug', 'HTTP/2.0 markAsRead response:', { 
-        hasResponse: !!response, 
-        hasData: !!(response && response.data),
-        dataType: typeof (response && response.data),
-        data: response && response.data
+        hasResponse: response !== undefined, 
+        dataType: typeof response,
+        data: response
       })
       
-      if (response && response.data !== undefined) {
-        // response.data 已经是 Boolean 值（true/false）
+      if (response !== undefined) {
+        // 返回的 response 已经是 Boolean 值（true/false）或具体结果
         myLog('debug', 'HTTP: Message marked as read successfully', { 
           conversationId, 
           serverMsgId,
-          result: response.data
+          result: response
         })
         return {
           success: true,
-          data: response.data  // Boolean 值
+          data: response
         }
       } else {
         throw new Error('Invalid response: missing data')
