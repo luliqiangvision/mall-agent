@@ -20,7 +20,8 @@ if (typeof __APP_CONFIG__ !== 'undefined') {
       CHAT_BASE_URL: 'localhost:80',
       APP_TITLE: '客服系统-开发环境',
       LOG_LEVEL: 'debug',
-      WS_URL: 'ws://localhost:80/customer-service/ws'
+      WS_URL: 'ws://localhost:80/customer-service/ws',
+      BUSINESS_LINE: ''
     }
   }
 } else {
@@ -31,7 +32,8 @@ if (typeof __APP_CONFIG__ !== 'undefined') {
     CHAT_BASE_URL: 'localhost:80',
     APP_TITLE: '客服系统-开发环境',
     LOG_LEVEL: 'debug',
-    WS_URL: 'ws://localhost:80/customer-service/ws'
+    WS_URL: 'ws://localhost:80/customer-service/ws',
+    BUSINESS_LINE: ''
   }
 }
 
@@ -45,6 +47,7 @@ export const CHAT_BASE_URL = APP_CONFIG.CHAT_BASE_URL
 export const APP_TITLE = APP_CONFIG.APP_TITLE
 export const LOG_LEVEL = APP_CONFIG.LOG_LEVEL
 export const WS_URL = APP_CONFIG.WS_URL
+export const BUSINESS_LINE = APP_CONFIG.BUSINESS_LINE
 
 // 默认导出配置对象
 export default APP_CONFIG

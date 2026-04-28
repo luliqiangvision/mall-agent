@@ -5,6 +5,25 @@
  */
 
 import { myLog } from './log.js'
+import { BUSINESS_LINE } from '@/utils/appConfig.js'
+
+function handleUnauthorized(redirectUrl = '/pages/login/index') {
+  uni.removeStorageSync('token')
+  uni.removeStorageSync('userInfo')
+  uni.showModal({
+    title: '提示',
+    content: '你已被登出，可以取消继续留在该页面，或者重新登录',
+    confirmText: '重新登录',
+    cancelText: '取消',
+    success(resModal) {
+      if (resModal.confirm) {
+        uni.reLaunch({
+          url: redirectUrl
+        })
+      }
+    }
+  })
+}
 
 /**
  * HTTP/2.0 请求工具类
@@ -29,7 +48,8 @@ class Http2RequestUtil {
       if (token) {
         config.header = {
           ...config.header,
-          Authorization: token
+          Authorization: token,
+          ...(BUSINESS_LINE ? { 'X-Business-Line': BUSINESS_LINE } : {})
         }
       }
       myLog('debug', 'HTTP/2.0 request interceptor applied', { hasToken: !!token })
@@ -56,19 +76,7 @@ class Http2RequestUtil {
 
           // 鉴权异常处理（后端也可能通过 HTTP 状态码表达）
           if (response.statusCode === 401 || payload.errorCode === '401') {
-            uni.showModal({
-              title: '提示',
-              content: '你已被登出，可以取消继续留在该页面，或者重新登录',
-              confirmText: '重新登录',
-              cancelText: '取消',
-              success(res) {
-                if (res.confirm) {
-                  uni.reLaunch({
-                    url: '/pages/login/index'
-                  })
-                }
-              }
-            })
+            handleUnauthorized('/pages/login/index')
           }
 
           throw new Error(payload.errorMessage || 'Request failed')
@@ -286,17 +294,7 @@ class Http2RequestUtil {
       if (!result.success) {
         uni.showToast({ title: result.errorMessage || '请求失败', duration: 1500 })
         if (response.status === 401 || result.errorCode === '401') {
-          uni.showModal({
-            title: '提示',
-            content: '你已被登出，可以取消继续留在该页面，或者重新登录',
-            confirmText: '重新登录',
-            cancelText: '取消',
-            success(res) {
-              if (res.confirm) {
-                uni.reLaunch({ url })
-              }
-            }
-          })
+          handleUnauthorized('/pages/login/index')
         }
         throw new Error(result.errorMessage || 'Request failed')
       }
@@ -355,17 +353,7 @@ class Http2RequestUtil {
         if (!res.success) {
           uni.showToast({ title: res.errorMessage || '请求失败', duration: 1500 })
           if (response.statusCode === 401 || res.errorCode === '401') {
-            uni.showModal({
-              title: '提示',
-              content: '你已被登出，可以取消继续留在该页面，或者重新登录',
-              confirmText: '重新登录',
-              cancelText: '取消',
-              success(resModal) {
-                if (resModal.confirm) {
-                  uni.reLaunch({ url })
-                }
-              }
-            })
+            handleUnauthorized('/pages/login/index')
           }
           throw new Error(res.errorMessage || 'Request failed')
         }

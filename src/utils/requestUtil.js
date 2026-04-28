@@ -1,8 +1,28 @@
 import Request from '@/js_sdk/luch-request/request.js'
-import { CHAT_BASE_URL } from '@/utils/appConfig.js'
+import { CHAT_BASE_URL, BUSINESS_LINE } from '@/utils/appConfig.js'
 import { myLog } from '@/utils/log.js'
 
 const http = new Request()
+
+function handleUnauthorized() {
+  uni.removeStorageSync('token')
+  uni.removeStorageSync('userInfo')
+  uni.showModal({
+    title: '提示',
+    content: '你已被登出，可以取消继续留在该页面，或者重新登录',
+    confirmText: '重新登录',
+    cancelText: '取消',
+    success(resModal) {
+      if (resModal.confirm) {
+        uni.reLaunch({
+          url: '/pages/login/index',
+        })
+      } else if (resModal.cancel) {
+        myLog('info', '用户点击取消')
+      }
+    },
+  })
+}
 
 http.setConfig((config) => { /* 设置全局配置 */ 
   // CHAT_BASE_URL 只包含域名和端口，需要自己添加 http:// 协议头
@@ -28,10 +48,10 @@ http.interceptor.request((config, cancel) => { /* 请求之前拦截器 */
   if (token) {
     config.header = {
       Authorization: token,
+      ...(BUSINESS_LINE ? { 'X-Business-Line': BUSINESS_LINE } : {}),
       ...config.header,
     }
-  }
-  else {
+  } else {
     config.header = {
       ...config.header,
     }
@@ -64,27 +84,23 @@ http.interceptor.response((response) => { /* 请求之后拦截器 */
     })
     // 401 未登录处理
     if (res.errorCode === '401' || response.statusCode === 401) {
-      uni.showModal({
-        title: '提示',
-        content: '你已被登出，可以取消继续留在该页面，或者重新登录',
-        confirmText: '重新登录',
-        cancelText: '取消',
-        success(resModal) {
-          if (resModal.confirm) {
-            uni.reLaunch({
-              url: '/pages/login/index',
-            })
-          } else if (resModal.cancel) {
-            myLog('info', '用户点击取消')
-          }
-        },
-      })
+      handleUnauthorized()
     }
     return Promise.reject(response)
   }
 
   return res.data
 }, (response) => {
+  const statusCode = response?.statusCode
+    || response?.status
+    || response?.data?.statusCode
+    || response?.response?.statusCode
+
+  if (statusCode === 401) {
+    handleUnauthorized()
+    return Promise.reject(response)
+  }
+
   // 提示错误信息
   myLog('info', 'response error', response)
   uni.showToast({
