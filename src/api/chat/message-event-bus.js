@@ -233,11 +233,27 @@ class MessageEventBus {
 
 // 导出单例
 let instance = null
+const GLOBAL_EVENT_BUS_KEY = '__MALL_AGENT_CHAT_EVENT_BUS__'
 
 export function getEventBus() {
+  const globalObj = typeof globalThis !== 'undefined' ? globalThis : null
+  if (globalObj && globalObj[GLOBAL_EVENT_BUS_KEY]) {
+    const globalInstance = globalObj[GLOBAL_EVENT_BUS_KEY]
+    if (instance && instance !== globalInstance) {
+      myLog('warn', 'Detected split MessageEventBus instance, using global instance')
+    }
+    instance = globalInstance
+    return instance
+  }
+
   if (!instance) {
     instance = new MessageEventBus()
   }
+
+  if (globalObj && !globalObj[GLOBAL_EVENT_BUS_KEY]) {
+    globalObj[GLOBAL_EVENT_BUS_KEY] = instance
+  }
+
   return instance
 }
 

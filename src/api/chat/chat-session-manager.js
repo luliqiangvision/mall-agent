@@ -823,8 +823,12 @@ class ChatSessionManager {
         shopId: this.shopId, // 店铺ID（客服端必需字段）
         type: "text",
         fromUserId: uni.getStorageSync("userInfo")?.agentId,
+        // 兼容升级：先占位，后续接入真实 agentNo
+        fromUserNo: null,
         // senderId 为发送者ID；在客户侧无转发场景，等同于 fromUserId
         senderId: uni.getStorageSync("userInfo")?.agentId,
+        // 兼容升级：先占位，后续接入真实 agentNo
+        senderNo: null,
         timestamp: Date.now(),
         content: content.trim(),
         uiState: "sending",

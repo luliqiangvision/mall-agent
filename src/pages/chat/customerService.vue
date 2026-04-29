@@ -39,8 +39,9 @@
                     </view>
                 </view>
 
-                <view class="message-item" v-for="(message, index) in finalRealDisplayMessages" :key="index"
-                    :class="message.type" :id="getSafeMessageId(message, index)">
+                <view class="message-item" v-for="(message, index) in finalRealDisplayMessages"
+                    :key="buildMessageRenderKey(message)" :class="message.type"
+                    :id="generateSafeId(buildMessageRenderKey(message))">
                     <view class="message-row" :class="message.type">
                         <!-- 左侧：用户（客户）头像或状态区 -->
                         <view v-if="message.type === 'user'" class="avatar-wrap left">
@@ -484,12 +485,19 @@ export default {
             });
         },
 
-        // 获取安全的消息ID（用于DOM元素ID和CSS选择器）
-        // 将 clientMsgId 中的特殊字符（如冒号）替换为安全字符
-        getSafeMessageId(message, index) {
-            const id = message.clientMsgId || `index-${index}`;
-            // 将冒号替换为下划线，确保CSS选择器有效
-            return `message-${String(id).replace(/:/g, '_')}`;
+        // 生成消息渲染主键（必须使用稳定业务主键 clientMsgId）
+        buildMessageRenderKey(message) {
+            const key = message && message.clientMsgId;
+            if (!key) {
+                myLog('error', 'Invalid message: missing required clientMsgId', { message });
+                return '__INVALID_CLIENT_MSG_ID__';
+            }
+            return String(key);
+        },
+
+        // 生成安全 DOM id（用于 CSS 选择器）
+        generateSafeId(rawKey) {
+            return `message-${String(rawKey).replace(/:/g, '_')}`;
         },
 
         // 观察所有消息元素
@@ -506,7 +514,7 @@ export default {
 
             this.finalRealDisplayMessages.forEach((message, index) => {
                 // 使用安全的ID生成函数，确保选择器有效
-                const selector = `#${this.getSafeMessageId(message, index)}`;
+                const selector = `#${this.generateSafeId(this.buildMessageRenderKey(message))}`;
 
                 this.intersectionObserver.observe(selector, (res) => {
                     myLog('debug', 'Message visibility changed', { selector, intersectionRatio: res.intersectionRatio });
@@ -895,7 +903,7 @@ export default {
             if (!this.finalRealDisplayMessages || this.finalRealDisplayMessages.length === 0) return '';
             const lastIndex = this.finalRealDisplayMessages.length - 1;
             const last = this.finalRealDisplayMessages[lastIndex];
-            return this.getSafeMessageId(last, lastIndex);
+            return this.generateSafeId(this.buildMessageRenderKey(last));
         },
 
         // 处理滚动事件（使用uni-app的查询API）

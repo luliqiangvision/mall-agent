@@ -66,6 +66,22 @@ class ShopChatManager {
     // 检查是否已存在该店铺+会话的实例
     if (this.shopSessions.has(sessionKey)) {
       const existingSession = this.shopSessions.get(sessionKey)
+
+      // 复用会话时重绑当前页面回调，避免回调仍指向旧页面实例
+      existingSession.onConnectionChange = chatOptions.onConnectionChange
+      existingSession.onMessageRenderCallback = chatOptions.onMessageRenderCallback
+      existingSession.onMessageStatusChange = chatOptions.onMessageStatusChange
+      existingSession.onError = chatOptions.onError
+
+      // 同步 HTTP 管理器，确保复用会话后的后续请求仍走当前上下文
+      if (chatOptions.chatHttpManager) {
+        existingSession.chatHttpManager = chatOptions.chatHttpManager
+        if (existingSession.messageDisplayManager) {
+          existingSession.messageDisplayManager.chatHttpManager =
+            chatOptions.chatHttpManager
+        }
+      }
+
       myLog('debug', `Reusing existing session for shop ${shopId} and conversation ${conversationId}`, {
         sessionKey,
         messageCount: existingSession.messageDisplayManager?.allAckedMessages?.length || 0,
@@ -209,11 +225,27 @@ class ShopChatManager {
 
 // 导出单例
 let shopChatManagerInstance = null
+const GLOBAL_SHOP_CHAT_MANAGER_KEY = '__MALL_AGENT_SHOP_CHAT_MANAGER__'
 
 export function getShopChatManager() {
+  const globalObj = typeof globalThis !== 'undefined' ? globalThis : null
+  if (globalObj && globalObj[GLOBAL_SHOP_CHAT_MANAGER_KEY]) {
+    const globalInstance = globalObj[GLOBAL_SHOP_CHAT_MANAGER_KEY]
+    if (shopChatManagerInstance && shopChatManagerInstance !== globalInstance) {
+      myLog('warn', 'Detected split ShopChatManager instance, using global instance')
+    }
+    shopChatManagerInstance = globalInstance
+    return shopChatManagerInstance
+  }
+
   if (!shopChatManagerInstance) {
     shopChatManagerInstance = new ShopChatManager()
   }
+
+  if (globalObj && !globalObj[GLOBAL_SHOP_CHAT_MANAGER_KEY]) {
+    globalObj[GLOBAL_SHOP_CHAT_MANAGER_KEY] = shopChatManagerInstance
+  }
+
   return shopChatManagerInstance
 }
 
