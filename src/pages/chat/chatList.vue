@@ -185,7 +185,7 @@ export default {
             for (const [conversationId, viewData] of Object.entries(conversationMap)) {
                 // 从 shop 对象中读取店铺信息
                 const shop = viewData.shop || {};
-                const shopId = shop.id;
+                const shopId = shop.shopId;
                 const messages = viewData.messages || [];
                 // 缓存消息数据（供 customerService.vue 使用）
                 if (shopId) {

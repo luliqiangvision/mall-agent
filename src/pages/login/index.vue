@@ -145,7 +145,7 @@ export default {
 
 								// 从 shop 对象中读取店铺信息
 								const shop = viewData.shop || {}
-								const shopId = shop.id
+								const shopId = shop.shopId
 								const messages = viewData.messages || []  // 所有消息（不仅是未读的）
 
 								// 缓存消息数据到 window.conversationCache（供后续聊天窗口使用）
