@@ -27,14 +27,14 @@ class GlobalHeartbeatManager {
    * @returns {Array<String>} conversationId 数组
    */
   getAllConversationIdsFromCache() {
-    if (!window.conversationCache) {
+    if (!window.conversationCacheByConvId) {
       return []
     }
     
     const conversationIds = []
-    for (const [, cache] of Object.entries(window.conversationCache)) {
-      if (cache.conversationId) {
-        conversationIds.push(cache.conversationId)
+    for (const [conversationId, cache] of Object.entries(window.conversationCacheByConvId)) {
+      if (cache.conversationId || conversationId) {
+        conversationIds.push(cache.conversationId || conversationId)
       }
     }
     
@@ -135,13 +135,10 @@ class GlobalHeartbeatManager {
       let clientMaxServerMsgId = 0
       
       // 方式1：从聊天列表（我的消息）的缓存获取
-      const cacheKey = Object.keys(window.conversationCache || {}).find(shopId => {
-        const cache = window.conversationCache[shopId]
-        return cache?.conversationId === conversationId
-      })
-      
-      if (cacheKey && window.conversationCache[cacheKey]) {
-        const cache = window.conversationCache[cacheKey]
+      // 缓存必须按 conversationId 隔离；同一个 shopId 下可能有多个会话。
+      // 不再读取 conversationCache[shopId]，避免心跳使用其它窗口的消息游标。
+      const cache = window.conversationCacheByConvId?.[conversationId]
+      if (cache) {
         if (cache.messages && cache.messages.length > 0) {
           clientMaxServerMsgId = cache.messages[cache.messages.length - 1].serverMsgId || 0
         }

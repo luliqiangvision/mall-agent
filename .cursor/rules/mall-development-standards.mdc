@@ -1,0 +1,18 @@
+---
+description: 商城/客服 uni 跨端项目开发规范（架构、日志、API、共享层等）
+alwaysApply: true
+---
+
+# 开发规范
+
+1. 能不写 try/catch 就别写；若写了，尽量避免两层 try 嵌套。
+2. 写代码要考虑架构，当前是跨平台的 uni 框架。
+3. 注释要用中文；AI 返回给用户的说明性内容也用中文,所有命令行切记不要搞出来中文乱码。
+4. 写代码不要用默认值敷衍；没有值就用 `null` 并打印错误报告。
+5. `catch` 里一定要打印日志。
+6. 不要用 GET 方法；GET 没有 POST 安全（按项目约定使用合适方法）。
+7. 调试日志统一使用 `myLog`。
+8. 纯逻辑代码必须抽离到共享层（如 `shared/api`、`shared/utils`、`shared/domain`、`shared/store`、`shared/composables`），不要直接堆在 `.vue` 里。
+9. `.vue` 文件只负责页面展示和交互编排，禁止把可复用业务逻辑写死在页面里，防止手机端和电脑端各自维护一套 JS 逻辑。
+10. 客服消息工作台：角色与 list 接口映射见 `src/api/chat/conversation-workbench-config.js`；列表刷新由 `conversation-workbench-poller.js` 统一 HTTP 轮询，页面只订阅不重复写拉取逻辑。
+11. 不要删除代码的备注，除非逻辑发生了变化，如果发生了变化，那就写变化后的逻辑

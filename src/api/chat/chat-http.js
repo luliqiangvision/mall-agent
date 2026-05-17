@@ -247,23 +247,65 @@ class ChatHttpManager {
 
 
   /**
-   * 获取聊天窗口列表（获取用户所有会话列表）
-   * @param {Object} options - 选项
-   * @param {String} options.userId - 用户ID
-   * @returns {Promise<Object>} 返回会话列表数据
+   * 工作台 list 类接口统一 POST（请求体可为 {}，身份由网关/token 解析）
+   * @param {string} path 如 listConversations、listCorporateConversations
+   * @returns {Promise<{ conversations: Array, totalUnreadCount: number, conversationUnreadCounts: object }>}
+   */
+  async _postConversationList(path, data = {}) {
+    const response = await request({
+      url: `${this.baseUrl}/agent-service/conversation/${path}`,
+      method: 'POST',
+      data,
+    })
+    return response || { conversations: [], totalUnreadCount: 0, conversationUnreadCounts: {} }
+  }
+
+  /** 店铺主接待：我是主接待且会话有 shop_id（对应工作台「我的接待」） */
+  async listConversations(data = {}) {
+    return this._postConversationList('listConversations', data)
+  }
+
+  /** 参与协作：我在群内且非主接待（对应「协作」） */
+  async listParticipantConversations(data = {}) {
+    return this._postConversationList('listParticipantConversations', data)
+  }
+
+  /** 未配置店铺客服：有 shop、无主接待、waiting（售前「待接待（店铺未配置客服人员）」） */
+  async listConversationsWithoutConfiguredAgentReception(data = {}) {
+    return this._postConversationList('listConversationsWithoutConfiguredAgentReception', data)
+  }
+
+  /** 公司级：无 shop 的会话池（老板「公司级」Tab，不可单靠 getChatWindowList） */
+  async listCorporateConversations(data = {}) {
+    return this._postConversationList('listCorporateConversations', data)
+  }
+
+  /**
+   * 加入会话 / 抢接待：waiting 且无主接待时写主接待；已有主接待则仅加群成员
+   * @param {string} conversationId
+   * @returns {Promise<{ success: boolean, errorMessage?: string, conversationInfo?: object }>}
+   */
+  async joinConversation(conversationId) {
+    const response = await request({
+      url: `${this.baseUrl}/agent-service/conversation/joinConversation`,
+      method: 'POST',
+      data: { conversationId },
+    })
+    return response
+  }
+
+  /**
+   * 首屏消息预览：店铺主接待 + 协作的最近消息（不含待接待池、不含公司级无 shop 会话）
+   * 与 list 接口配合使用，结果经 cacheWindowList 按 conversationId 写入 window.conversationCacheByConvId
    */
   async getChatWindowList(options = {}) {
     try {
       myLog('debug', 'HTTP: Getting chat window list', options)
-      
-      const data = {
-        userId: options.userId || uni.getStorageSync('userInfo')?.agentId
-      }
 
       const response = await request({
         url: `${this.baseUrl}/agent-service/conversation/getChatWindowList`,
         method: 'POST',
-        data: data
+        data: {},
       })
       if (response) {
         const result = {

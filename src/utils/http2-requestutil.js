@@ -45,12 +45,10 @@ class Http2RequestUtil {
     // 请求拦截器：添加认证token
     this.addRequestInterceptor((config) => {
       const token = uni.getStorageSync('token') // 使用 token 作为 key
-      if (token) {
-        config.header = {
-          ...config.header,
-          Authorization: token,
-          ...(BUSINESS_LINE ? { 'X-Business-Line': BUSINESS_LINE } : {})
-        }
+      config.header = {
+        ...(BUSINESS_LINE ? { businessLine: BUSINESS_LINE } : {}),
+        ...(token ? { Authorization: token } : {}),
+        ...config.header,
       }
       myLog('debug', 'HTTP/2.0 request interceptor applied', { hasToken: !!token })
       return config

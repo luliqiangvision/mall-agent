@@ -1,37 +1,80 @@
 <template>
     <view class="chat-list-container">
-        <!-- 聊天列表 -->
-        <scroll-view class="chat-list" scroll-y="true">
-            <!-- 空状态 -->
+        <!-- 当前登录客服角色（只读，来自 /agent/info 的 agentType） -->
+        <view class="role-bar" v-if="roleDisplayName">
+            <text class="role-label">当前角色</text>
+            <text class="role-value">{{ roleDisplayName }}</text>
+        </view>
+
+        <!-- 顶部分段 -->
+        <scroll-view class="segment-bar" scroll-x v-if="segments.length > 1">
+            <view
+                v-for="seg in segments"
+                :key="seg.id"
+                class="segment-item"
+                :class="{ active: activeSegmentId === seg.id }"
+                @click="switchSegment(seg.id)"
+            >
+                <text class="segment-label">{{ seg.label }}</text>
+                <view
+                    v-if="getSegmentBadge(seg) > 0"
+                    class="segment-badge"
+                    :class="{ warning: seg.isWaitingTab }"
+                >{{ getSegmentBadge(seg) > 99 ? '99+' : getSegmentBadge(seg) }}</view>
+            </view>
+        </scroll-view>
+
+        <scroll-view class="chat-list" scroll-y>
             <view class="empty-state" v-if="conversationList.length === 0 && !isLoading">
-                <text class="empty-text">暂无聊天记录</text>
+                <text class="empty-text">{{ emptyText }}</text>
             </view>
 
-            <!-- 加载中 -->
             <view class="loading-state" v-if="isLoading">
                 <text class="loading-text">加载中...</text>
             </view>
 
-            <!-- 聊天列表项 -->
-            <view class="chat-item" v-for="(conversation, index) in conversationList" :key="conversation.conversationId"
-                @click="openConversation(conversation)">
-                <!-- 店铺头像 -->
+            <view
+                class="chat-item"
+                v-for="conversation in conversationList"
+                :key="conversation.conversationId"
+                :class="{ 'item-waiting': conversation.needsJoin }"
+                @click="openConversation(conversation)"
+            >
                 <view class="avatar-container">
-                    <image class="avatar" :src="conversation.shopIcon || '/static/default-shop.png'" mode="aspectFill">
-                    </image>
-                    <view class="unread-badge" v-if="conversation.unreadCount > 0">{{ conversation.unreadCount > 99 ?
-                        '99+' : conversation.unreadCount }}</view>
+                    <image
+                        v-if="conversation.avatarType === 'shop' && conversation.shopIcon"
+                        class="avatar"
+                        :src="conversation.shopIcon"
+                        mode="aspectFill"
+                    />
+                    <view
+                        v-else
+                        class="avatar avatar-text"
+                        :class="'avatar-' + conversation.avatarType"
+                    >
+                        <text>{{ avatarText(conversation.avatarType) }}</text>
+                    </view>
+                    <view class="unread-badge" v-if="conversation.unreadCount > 0">
+                        {{ conversation.unreadCount > 99 ? '99+' : conversation.unreadCount }}
+                    </view>
                 </view>
 
-                <!-- 消息内容 -->
                 <view class="chat-content">
                     <view class="chat-header">
-                        <text class="shop-name">{{ getDisplayShopName(conversation) }}</text>
+                        <text class="shop-name">{{ conversation.title }}</text>
                         <text class="time">{{ formatTime(conversation.lastMessageTime) }}</text>
                     </view>
                     <view class="last-message">
-                        <text class="last-message-text">{{ conversation.lastMessage }}</text>
+                        <text class="last-message-text">{{ conversationSubtitle(conversation) }}</text>
                     </view>
+                    <view class="row-meta" v-if="conversation.needsJoin || conversation.avatarType === 'corporate'">
+                        <text class="meta-tag" v-if="conversation.needsJoin">点击接待</text>
+                        <text class="meta-tag corp" v-else-if="conversation.avatarType === 'corporate'">公司级</text>
+                    </view>
+                </view>
+
+                <view class="waiting-pill" v-if="conversation.needsJoin">
+                    <text>待接待</text>
                 </view>
             </view>
         </scroll-view>
@@ -39,446 +82,321 @@
 </template>
 
 <script>
+/**
+ * 客服消息列表页（TabBar「消息」）
+ *
+ * 数据流：
+ * 1. conversation-workbench-poller 每 15s HTTP 拉各角色 list + getChatWindowList
+ * 2. 本页 subscribe 轮询结果 → applyWorkbench 刷新分段 Tab 与列表
+ * 3. WS 消息心跳仍由 GlobalHeartbeatManager 负责「已知会话」新消息，不负责新会话进列表
+ *
+ * 分段与接口映射见 conversation-workbench-config.js
+ */
 import ChatHttpManager from '@/api/chat/chat-http.js';
+import { getWorkbenchPoller, startWorkbenchPoller } from '@/api/chat/conversation-workbench-poller.js';
 import { getChatWebSocketConnection } from '@/api/chat/chat-session-manager.js';
 import { getEventBus } from '@/api/chat/message-event-bus.js';
 import { getUnreadCountManager } from '@/api/chat/unread-count-manager.js';
-import { getShopChatManager } from '@/api/chat/shop-chat-manager.js';
 import { getGlobalHeartbeatManager } from '@/api/chat/global-heartbeat-manager.js';
 import { myLog } from '@/utils/log.js';
+
+/** agentType → 界面展示文案（与登录接口 agentType 一致） */
+const ROLE_LABELS = {
+    'pre-sales': '售前',
+    'after-sales': '售后',
+    corporate: '老板',
+    legal: '法务',
+    tax: '税务',
+    system: '系统',
+};
 
 export default {
     data() {
         return {
+            agentType: 'pre-sales',
+            segments: [],
+            activeSegmentId: 'mine',
+            segmentData: {},
             conversationList: [],
             totalUnreadCount: 0,
             isLoading: false,
             chatHttpManager: null,
             eventBus: null,
             unreadCountManager: null,
-            unsubscribeEvents: null // EventBus 取消订阅函数
+            unsubscribeEvents: null,
+            unsubWorkbenchPoll: null,
+            joiningId: null,
         };
     },
+    computed: {
+        emptyText() {
+            const seg = this.segments.find((s) => s.id === this.activeSegmentId);
+            return seg ? `${seg.label}暂无会话` : '暂无聊天记录';
+        },
+        roleDisplayName() {
+            const type = this.agentType || uni.getStorageSync('userInfo')?.agentType;
+            if (!type) return '';
+            return ROLE_LABELS[type] || type;
+        },
+    },
     async onLoad() {
-        console.log('ChatList页面加载');
-        // 初始化未读数管理器
+        this.syncAgentTypeFromLogin();
         this.unreadCountManager = getUnreadCountManager();
-        // 初始化HTTP管理器
         this.initChatHttpManager();
-        // 加载聊天列表
-        await this.loadChatList();
-        // 初始化心跳管理器（从缓存加载会话ID）
+        this.bindWorkbenchPoller();
+        startWorkbenchPoller();
+        this.isLoading = true;
+        await getWorkbenchPoller().refreshNow({ source: 'pageLoad' });
+        this.isLoading = false;
         const heartbeatManager = getGlobalHeartbeatManager();
-        heartbeatManager.initializeConversationIds();
-        // 启动心跳
         heartbeatManager.startHeartbeat();
-        // 初始化 WebSocket
         this.initWebSocket();
-        // 订阅 EventBus 消息
         this.subscribeToEvents();
     },
     async onShow() {
-        // 当页面显示时，重新加载聊天列表（确保数据是最新的）
-        // 初始化HTTP管理器（如果还未初始化）
+        this.syncAgentTypeFromLogin();
         if (!this.chatHttpManager) {
             this.initChatHttpManager();
         }
-        // 重新加载聊天列表
-        await this.loadChatList();
-        
-        // 点击消息标签（TabBar）进入聊天列表页时，启动心跳
-        // 初始化心跳管理器（从缓存加载会话ID）
+        startWorkbenchPoller();
+        getWorkbenchPoller().refreshNow({ source: 'pageShow' });
         const heartbeatManager = getGlobalHeartbeatManager();
         heartbeatManager.initializeConversationIds();
-        // 启动心跳（如果还未启动）
-        heartbeatManager.startHeartbeat(); // startHeartbeat 内部会检查是否已启动，避免重复启动
-        
-        // 更新 tabBar badge（如果加载失败，从缓存读取）
-        if (this.totalUnreadCount > 0) {
-            this.updateTabBarBadge(this.totalUnreadCount);
-        } else {
-            // 如果 totalUnreadCount 为0，尝试从缓存读取（登录时可能已缓存）
-            const cachedCount = uni.getStorageSync('totalUnreadCount') || 0
-            if (cachedCount > 0) {
-                this.updateTabBarBadge(cachedCount);
-            }
+        heartbeatManager.startHeartbeat();
+        const cachedCount = uni.getStorageSync('totalUnreadCount') || 0;
+        if (cachedCount > 0) {
+            this.updateTabBarBadge(cachedCount);
         }
     },
     onUnload() {
-        // 页面卸载时清理资源
-        myLog('debug', 'ChatList 页面卸载');
-        // 取消订阅事件
         if (this.unsubscribeEvents) {
             this.unsubscribeEvents();
         }
-        // 注意：心跳由 GlobalHeartbeatManager 统一管理，不在这里停止
+        if (this.unsubWorkbenchPoll) {
+            this.unsubWorkbenchPoll();
+            this.unsubWorkbenchPoll = null;
+        }
     },
     methods: {
-        // 初始化HTTP管理器
+        /** 从登录态读取 agentType，工作台分段与轮询均以此为准 */
+        syncAgentTypeFromLogin() {
+            const userInfo = uni.getStorageSync('userInfo') || {};
+            if (userInfo.agentType) {
+                this.agentType = userInfo.agentType;
+            }
+        },
         initChatHttpManager() {
             this.chatHttpManager = new ChatHttpManager({
-                // baseUrl 使用 ChatHttpManager 的默认值（从 CHAT_BASE_URL 获取）
-                conversationId: null, // 列表页面不需要单个会话ID
+                conversationId: null,
                 onMessageRenderCallback: (data) => this.handleMessageReceived(data),
-                onError: (error) => {
-                    console.error('HTTP聊天错误:', error);
-                }
+                onError: (error) => console.error('HTTP聊天错误:', error),
             });
         },
-        // 初始化 WebSocket
         initWebSocket() {
-            myLog('debug', '初始化 WebSocket');
             this.eventBus = getEventBus();
-            // 连接 WebSocket
             const wsConnection = getChatWebSocketConnection();
             if (!wsConnection.isConnectionActive()) {
                 wsConnection.connect();
             }
-            // 监听 WebSocket 连接状态变化（心跳由 GlobalHeartbeatManager 统一管理）
-            this.eventBus.subscribeConnection((connected) => {
-                if (connected) {
-                    myLog('debug', 'WebSocket 连接成功');
-                } else {
-                    myLog('debug', 'WebSocket 断开');
-                }
+        },
+        /** 订阅全局轮询器；interval/pageShow 时保留用户当前选中的分段 */
+        bindWorkbenchPoller() {
+            const poller = getWorkbenchPoller();
+            this.unsubWorkbenchPoll = poller.subscribe((workbench, meta) => {
+                const preserveActive =
+                    meta?.source === 'interval' ||
+                    meta?.source === 'pageShow' ||
+                    meta?.source === 'manual';
+                this.onWorkbenchUpdated(workbench, preserveActive);
             });
         },
-        // 加载聊天列表
-        async loadChatList() {
-            this.isLoading = true;
-            try {
-                const userInfo = uni.getStorageSync('userInfo');
-                if (!userInfo || !userInfo.agentId) {
-                    console.warn('用户未登录或agentId不存在，无法加载聊天列表');
-                    return;
-                }
-                
-                console.log('加载聊天列表, agentId:', userInfo.agentId);
-                const result = await this.chatHttpManager.getChatWindowList({
-                    userId: userInfo.agentId  // API参数名仍为userId，但值从agentId获取
-                });
-                if (result && result.success && result.conversations) {
-                    this.processConversationData(result.conversations);
-                } else {
-                    console.warn('加载聊天列表失败:', result);
-                }
-            } catch (error) {
-                console.error('加载聊天列表失败:', error);
-                uni.showToast({
-                    title: '加载失败',
-                    icon: 'none'
-                });
-            } finally {
+        onWorkbenchUpdated(workbench, preserveActiveSegment = false) {
+            if (!workbench) return;
+            this.applyWorkbench(workbench, preserveActiveSegment);
+            this.syncUnreadFromWorkbench(workbench);
+            if (this.isLoading) {
                 this.isLoading = false;
             }
         },
-        // 处理会话数据
-        processConversationData(conversationMap) {
-            console.log('处理会话数据:', conversationMap);
-            // 初始化缓存对象
-            if (!window.conversationCache) {
-                window.conversationCache = {};
+        applyWorkbench(workbench, preserveActiveSegment = false) {
+            const prevSegment = this.activeSegmentId;
+            this.agentType = workbench.agentType;
+            this.segments = workbench.segments;
+            this.segmentData = workbench.segmentData;
+            if (
+                preserveActiveSegment &&
+                workbench.segments.some((s) => s.id === prevSegment)
+            ) {
+                this.activeSegmentId = prevSegment;
+            } else {
+                this.activeSegmentId = workbench.activeSegmentId;
             }
-            // 将Map转换为数组
-            const conversationList = [];
-            let totalUnread = 0;
-            for (const [conversationId, viewData] of Object.entries(conversationMap)) {
-                // 从 shop 对象中读取店铺信息
-                const shop = viewData.shop || {};
-                const shopId = shop.shopId;
-                const messages = viewData.messages || [];
-                // 缓存消息数据（供 customerService.vue 使用）
-                if (shopId) {
-                    // 计算 clientMaxServerMsgId
-                    let clientMaxServerMsgId = 0;
-                    if (messages.length > 0) {
-                        const latestMsg = messages[messages.length - 1];
-                        clientMaxServerMsgId = latestMsg.serverMsgId || 0;
-                    }
-                    window.conversationCache[shopId] = {
-                        conversationId: conversationId,
-                        messages: messages,
-                        clientMaxServerMsgId: clientMaxServerMsgId
-                    };
-                    console.log(`缓存店铺 ${shopId} 的消息，数量:`, messages.length, 'clientMaxServerMsgId:', clientMaxServerMsgId);
+            this.totalUnreadCount = workbench.totalUnreadCount;
+            this.refreshListForSegment(this.activeSegmentId);
+            this.updateTabBarBadge(workbench.totalUnreadCount);
+            uni.setStorageSync('totalUnreadCount', workbench.totalUnreadCount);
+        },
+        syncUnreadFromWorkbench(workbench) {
+            for (const seg of Object.values(workbench.segmentData || {})) {
+                for (const item of seg.items || []) {
+                    this.unreadCountManager.setUnreadCount(item.conversationId, item.unreadCount || 0);
                 }
-                const conversation = {
-                    conversationId: conversationId,
-                    shopId: shopId,
-                    shopName: shop.shopName,
-                    shopIcon: shop.shopIcon,
-                    shopStatus: shop.shopStatus,
-                    contactPhone: shop.contactPhone,
-                    lastMessage: this.getLastMessage(messages),
-                    lastMessageTime: this.getLastMessageTime(messages),
-                    unreadCount: viewData.unreadCount,
-                    messages: messages
-                };
-                conversationList.push(conversation);
-                totalUnread += conversation.unreadCount;
-                // 初始化未读数管理器
-                this.unreadCountManager.setUnreadCount(conversationId, viewData.unreadCount || 0);
             }
-
-            // 排序：优先按未读数（有未读的放上面），然后按 conversationId
-            conversationList.sort((a, b) => {
-                // 第一排序规则：按未读消息数（降序）
-                const unreadDiff = (b.unreadCount || 0) - (a.unreadCount || 0);
-                if (unreadDiff !== 0) {
-                    return unreadDiff;
-                }
-                // 第二排序规则：按 conversationId
-                return a.conversationId.localeCompare(b.conversationId);
-            });
-            this.conversationList = conversationList;
-            this.totalUnreadCount = totalUnread;
-            // 更新 tabBar badge
-            this.updateTabBarBadge(totalUnread);
-            console.log('处理完成, 会话数:', conversationList.length, '总未读数:', totalUnread);
         },
-
-        // 获取最后一条消息
-        getLastMessage(messages) {
-            if (!messages || messages.length === 0) {
-                return '暂无消息';
-            }
-            const lastMsg = messages[messages.length - 1];
-            return lastMsg.content || '暂无消息';
+        refreshListForSegment(segmentId) {
+            const data = this.segmentData[segmentId];
+            this.conversationList = data?.items ? [...data.items] : [];
         },
-
-        // 获取最后消息时间
-        getLastMessageTime(messages) {
-            if (!messages || messages.length === 0) {
-                return new Date().toISOString();
-            }
-            const lastMsg = messages[messages.length - 1];
-            return lastMsg.timestamp || new Date().toISOString();
+        switchSegment(segmentId) {
+            if (this.activeSegmentId === segmentId) return;
+            this.activeSegmentId = segmentId;
+            this.refreshListForSegment(segmentId);
         },
-
-        // 获取显示用的店铺名称（拼接 conversationId 后十位，这是为了区分不同的客户）
-        getDisplayShopName(conversation) {
-            if (!conversation || !conversation.shopName) {
-                return '';
+        getSegmentBadge(seg) {
+            if (seg.isWaitingTab) {
+                const data = this.segmentData[seg.id];
+                return data?.count || 0;
             }
-            
-            const shopName = conversation.shopName;
-            if (conversation.conversationId) {
-                // 获取 conversationId 的后十位
-                const conversationIdStr = String(conversation.conversationId);
-                const lastTenDigits = conversationIdStr.length >= 10 
-                    ? conversationIdStr.slice(-10) 
-                    : conversationIdStr;
-                return `${shopName}${lastTenDigits}`;
-            }
-            
-            return shopName;
+            const data = this.segmentData[seg.id];
+            return data?.badgeUnread || data?.totalUnreadCount || 0;
         },
-        // 格式化时间（仅显示年月日）
+        avatarText(type) {
+            if (type === 'waiting') return '待';
+            if (type === 'corporate') return '司';
+            return '店';
+        },
+        conversationSubtitle(conversation) {
+            if (conversation.needsJoin && conversation.waitingMinutes) {
+                return `新客户咨询 · 等待 ${conversation.waitingMinutes} 分钟`;
+            }
+            return conversation.lastMessage || '暂无消息';
+        },
         formatTime(timestamp) {
             if (!timestamp) return '';
-
             const date = new Date(timestamp);
-            const year = date.getFullYear();
+            const now = new Date();
+            const isToday =
+                date.getFullYear() === now.getFullYear() &&
+                date.getMonth() === now.getMonth() &&
+                date.getDate() === now.getDate();
+            if (isToday) {
+                const hh = date.getHours().toString().padStart(2, '0');
+                const mm = date.getMinutes().toString().padStart(2, '0');
+                return `${hh}:${mm}`;
+            }
             const month = (date.getMonth() + 1).toString().padStart(2, '0');
             const day = date.getDate().toString().padStart(2, '0');
-
-            return `${year}/${month}/${day}`;
+            return `${month}/${day}`;
         },
-
-        // 更新 tabBar badge
         updateTabBarBadge(count) {
-            // tabBar 配置中，"消息"是第2个标签（索引从0开始，所以是索引1）
-            // 索引0：首页
-            // 索引1：消息
             const tabIndex = 1;
-
-            // 检查当前页面是否是 TabBar 页面
             try {
                 const pages = getCurrentPages();
-                if (!pages || pages.length === 0) {
-                    return;
-                }
-                const currentPage = pages[pages.length - 1];
-                const currentRoute = currentPage ? currentPage.route : '';
-                
-                // TabBar 页面路径列表（去掉前面的 / 和 .vue 后缀）
+                const currentRoute = pages[pages.length - 1]?.route || '';
                 const tabBarPages = ['pages/home/index', 'pages/chat/chatList'];
-                const isTabBarPage = tabBarPages.some(page => {
-                    // 处理路径格式差异（可能带 / 前缀或 .vue 后缀）
-                    return currentRoute === page || currentRoute === `/${page}` || currentRoute.includes(page);
-                });
-
-                // 如果当前不是 TabBar 页面，则不更新 badge（避免报错）
-                // 但当页面显示时（onShow）会重新更新，所以这里可以跳过
-                if (!isTabBarPage) {
-                    return;
-                }
+                if (!tabBarPages.some((p) => currentRoute.includes(p))) return;
             } catch (e) {
-                // 如果获取页面栈失败，尝试继续执行（可能在特殊情况下）
-                console.warn('检查当前页面失败:', e);
+                return;
             }
-
             try {
                 if (count > 0) {
                     uni.setTabBarBadge({
                         index: tabIndex,
-                        text: count > 99 ? '99+' : count.toString()
-                    }).catch(err => {
-                        // 使用 Promise.catch 捕获异步错误
-                        console.warn('设置 tabBar badge 失败:', err);
-                    });
+                        text: count > 99 ? '99+' : String(count),
+                    }).catch(() => {});
                 } else {
-                    // 移除 badge 前先检查是否存在，避免报错
-                    uni.removeTabBarBadge({
-                        index: tabIndex
-                    }).catch(err => {
-                        // 如果移除失败（比如 badge 不存在），忽略错误
-                        console.log('移除 tabBar badge 失败（可能不存在）:', err);
-                    });
+                    uni.removeTabBarBadge({ index: tabIndex }).catch(() => {});
                 }
-            } catch (error) {
-                // 如果 tabBar 未初始化或其他错误，忽略
-                console.warn('更新 tabBar badge 失败:', error);
+            } catch (e) {
+                /* ignore */
             }
         },
-
-        // 订阅 EventBus 消息
         subscribeToEvents() {
             this.eventBus = getEventBus();
-
-            // 订阅心跳响应
             this.unsubscribeEvents = this.eventBus.subscribe('*', (messageData) => {
                 this.handleEventBusMessage(messageData);
             });
-
-            myLog('debug', 'ChatList subscribed to EventBus');
         },
-
-        // 处理 EventBus 消息
         handleEventBusMessage(messageData) {
-            const { conversationId, payload, interfaceName, success, websocketCode, errorMessage, version } = messageData;
-
-            // 处理心跳响应
+            const { interfaceName, payload } = messageData;
             if (interfaceName === '/heartbeat') {
                 this.handleHeartbeatResponse(payload);
             }
-
-            // 处理拉取消息请求响应
             if (interfaceName === '/pullMessageRequest') {
                 this.handlePullMessageRequestResponse(payload);
             }
         },
-
-        // 处理心跳响应
         handleHeartbeatResponse(payload) {
-            if (!payload || !payload.items) return;
-
-            myLog('debug', '收到心跳响应', payload);
-
-            // 遍历心跳返回的每个会话结果
+            if (!payload?.items) return;
             for (const item of payload.items) {
-                const { conversationId, newMessages } = item;
-
-                if (newMessages && newMessages.length > 0) {
-                    // 有新消息，更新未读数
-                    this.unreadCountManager.incrementUnreadCount(conversationId, newMessages.length);
-
-                    // 更新会话列表
-                    this.updateConversationInList(conversationId, newMessages);
+                if (item.newMessages?.length) {
+                    this.unreadCountManager.incrementUnreadCount(item.conversationId, item.newMessages.length);
+                    this.updateConversationInList(item.conversationId, item.newMessages);
                 }
             }
-
-            // 更新总未读数
-            this.updateTotalUnreadCount();
-        },
-
-        // 更新会话列表中的会话信息
-        updateConversationInList(conversationId, newMessages) {
-            const conversation = this.conversationList.find(c => c.conversationId === conversationId);
-            if (!conversation) return;
-
-            // 更新最后一条消息
-            if (newMessages.length > 0) {
-                const lastMsg = newMessages[newMessages.length - 1];
-                conversation.lastMessage = lastMsg.content || '新消息';
-                conversation.lastMessageTime = lastMsg.timestamp || new Date().toISOString();
-            }
-
-            // 更新未读数
-            conversation.unreadCount = this.unreadCountManager.getUnreadCount(conversationId);
-        },
-
-        // 更新总未读数
-        updateTotalUnreadCount() {
             this.totalUnreadCount = this.unreadCountManager.getTotalUnreadCount();
             this.updateTabBarBadge(this.totalUnreadCount);
         },
+        updateConversationInList(conversationId, newMessages) {
+            const conversation = this.conversationList.find((c) => c.conversationId === conversationId);
+            if (!conversation || !newMessages.length) return;
+            const lastMsg = newMessages[newMessages.length - 1];
+            conversation.lastMessage = lastMsg.content || '新消息';
+            conversation.lastMessageTime = lastMsg.timestamp || Date.now();
+            conversation.unreadCount = this.unreadCountManager.getUnreadCount(conversationId);
+        },
+        handlePullMessageRequestResponse(payload) {
+            if (!payload?.message?.length) return;
+            this.unreadCountManager.incrementUnreadCount(payload.conversationId, payload.message.length);
+            this.updateConversationInList(payload.conversationId, payload.message);
+            this.totalUnreadCount = this.unreadCountManager.getTotalUnreadCount();
+            this.updateTabBarBadge(this.totalUnreadCount);
+        },
+        async openConversation(conversation) {
+            if (this.joiningId) return;
 
-        // 打开会话
-        openConversation(conversation) {
-            console.log('打开会话:', conversation);
+            if (conversation.needsJoin) {
+                this.joiningId = conversation.conversationId;
+                uni.showLoading({ title: '接待中...' });
+                try {
+                    const result = await this.chatHttpManager.joinConversation(conversation.conversationId);
+                    if (result?.success === false) {
+                        uni.showToast({
+                            title: result.errorMessage || '接待失败',
+                            icon: 'none',
+                        });
+                        await getWorkbenchPoller().refreshNow({ source: 'joinFailed' });
+                        return;
+                    }
+                } catch (e) {
+                    uni.showToast({ title: '接待失败', icon: 'none' });
+                    await getWorkbenchPoller().refreshNow({ source: 'joinFailed' });
+                    return;
+                } finally {
+                    uni.hideLoading();
+                    this.joiningId = null;
+                }
+                await getWorkbenchPoller().refreshNow({ source: 'joinSuccess' });
+            }
 
-            // 构建跳转URL
             const params = {
                 conversationId: conversation.conversationId,
-                shopId: conversation.shopId,
-                shopName: encodeURIComponent(conversation.shopName),
-                hasMessages: conversation.messages ? conversation.messages.length : 0
-            }
-
-            // 如果有店铺logo，添加到参数中
+                shopId: conversation.shopId || '',
+                shopName: encodeURIComponent(conversation.shopName || conversation.title || ''),
+                hasMessages: conversation.messages ? conversation.messages.length : 0,
+            };
             if (conversation.shopIcon) {
-                params.shopIcon = encodeURIComponent(conversation.shopIcon)
+                params.shopIcon = encodeURIComponent(conversation.shopIcon);
             }
-
-            const url = `/pages/chat/customerService?${Object.keys(params).map(k => `${k}=${params[k]}`).join('&')}`
-
-            // 跳转到聊天窗口
+            const url = `/pages/chat/customerService?${Object.keys(params)
+                .map((k) => `${k}=${params[k]}`)
+                .join('&')}`;
             uni.navigateTo({ url });
         },
-
-        // 处理接收到的消息
-        handleMessageReceived(data) {
-            console.log('收到消息:', data);
-
-            // 处理获取聊天窗口列表响应
-            if (data.interface === '/getChatWindowList') {
-                this.handleInitConversationView(data.payload);
-                return;
-            }
+        handleMessageReceived() {
+            /* 列表数据由 workbench 轮询统一刷新 */
         },
-
-        // 处理拉取消息请求响应
-        handlePullMessageRequestResponse(payload) {
-            if (!payload) return;
-
-            myLog('debug', '收到拉取消息请求响应', payload);
-
-            const { conversationId, message } = payload;
-
-            if (message && message.length > 0) {
-                // 有新消息，更新未读数
-                this.unreadCountManager.incrementUnreadCount(conversationId, message.length);
-
-                // 更新会话列表
-                this.updateConversationInList(conversationId, message);
-            }
-
-            // 更新总未读数
-            this.updateTotalUnreadCount();
-        },
-
-        // 处理初始化会话视图响应
-        handleInitConversationView(payload) {
-            console.log('初始化会话视图响应:', payload);
-
-            if (payload.success && payload.conversations) {
-                this.processConversationData(payload.conversations);
-            } else {
-                console.warn('初始化会话视图失败:', payload.error);
-            }
-        }
-    }
+    },
 };
 </script>
 
@@ -490,75 +408,146 @@ export default {
     background-color: #f5f5f5;
 }
 
-.header {
+.role-bar {
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    gap: 16upx;
     padding: 20upx 30upx;
-    background-color: #fff;
+    background: #fff;
     border-bottom: 1px solid #eee;
+    font-size: 26upx;
 
-    .title {
-        font-size: 36upx;
-        font-weight: bold;
+    .role-label {
+        color: #999;
+        flex-shrink: 0;
+    }
+
+    .role-value {
         color: #333;
+        font-weight: bold;
+    }
+}
+
+.segment-bar {
+    white-space: nowrap;
+    background: #fff;
+    border-bottom: 1px solid #eee;
+    padding: 16upx 12upx 0;
+}
+
+.segment-item {
+    display: inline-flex;
+    align-items: center;
+    padding: 12upx 24upx 20upx;
+    margin-right: 8upx;
+    position: relative;
+    color: #666;
+    font-size: 28upx;
+
+    &.active {
+        color: #409eff;
+        font-weight: bold;
+
+        &::after {
+            content: '';
+            position: absolute;
+            left: 24upx;
+            right: 24upx;
+            bottom: 8upx;
+            height: 4upx;
+            background: #409eff;
+            border-radius: 2upx;
+        }
+    }
+
+    .segment-badge {
+        margin-left: 8upx;
+        min-width: 32upx;
+        height: 32upx;
+        line-height: 32upx;
+        padding: 0 8upx;
+        font-size: 20upx;
+        text-align: center;
+        border-radius: 16upx;
+        background: #409eff;
+        color: #fff;
+
+        &.warning {
+            background: #fff7e6;
+            color: #d48806;
+            border: 1px solid #ffd591;
+        }
     }
 }
 
 .chat-list {
     flex: 1;
-    padding: 0;
+    height: 0;
 }
 
-.empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 500upx;
-    color: #999;
-
-    .empty-text {
-        font-size: 32upx;
-    }
-}
-
+.empty-state,
 .loading-state {
     display: flex;
     justify-content: center;
     align-items: center;
-    height: 500upx;
-
-    .loading-text {
-        font-size: 28upx;
-        color: #999;
-    }
+    height: 400upx;
+    color: #999;
+    font-size: 28upx;
 }
 
 .chat-item {
     display: flex;
     align-items: center;
-    padding: 30upx;
-    background-color: #fff;
+    padding: 28upx 30upx;
+    background: #fff;
     border-bottom: 1px solid #f0f0f0;
+
+    &.item-waiting {
+        background: #fffbf0;
+    }
 }
 
 .avatar-container {
     position: relative;
     margin-right: 20upx;
+    flex-shrink: 0;
 
     .avatar {
-        width: 100upx;
-        height: 100upx;
-        border-radius: 50%;
+        width: 96upx;
+        height: 96upx;
+        border-radius: 12upx;
+    }
+
+    .avatar-text {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 32upx;
+        font-weight: bold;
+        color: #666;
+
+        &.avatar-waiting {
+            background: #fff7e6;
+            color: #d48806;
+        }
+
+        &.avatar-corporate {
+            background: #e6f4ff;
+            color: #1677ff;
+        }
+
+        &.avatar-shop {
+            background: #f5f5f5;
+            color: #888;
+        }
     }
 
     .unread-badge {
         position: absolute;
-        top: -4upx;
-        right: -4upx;
-        background-color: #fa436a;
-        color: white;
+        top: -6upx;
+        right: -6upx;
+        background: #fa436a;
+        color: #fff;
         font-size: 20upx;
         padding: 2upx 8upx;
         border-radius: 20upx;
@@ -569,36 +558,62 @@ export default {
 
 .chat-content {
     flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
+    min-width: 0;
 
     .chat-header {
         display: flex;
         justify-content: space-between;
-        align-items: center;
-        margin-bottom: 10upx;
+        margin-bottom: 8upx;
 
         .shop-name {
-            font-size: 32upx;
+            font-size: 30upx;
             font-weight: bold;
             color: #333;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1;
         }
 
         .time {
             font-size: 24upx;
             color: #999;
+            flex-shrink: 0;
+            margin-left: 16upx;
         }
     }
 
-    .last-message {
-        .last-message-text {
-            font-size: 28upx;
-            color: #666;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+    .last-message-text {
+        font-size: 26upx;
+        color: #666;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        display: block;
+    }
+
+    .row-meta {
+        margin-top: 8upx;
+
+        .meta-tag {
+            font-size: 22upx;
+            color: #d48806;
+
+            &.corp {
+                color: #1677ff;
+            }
         }
     }
+}
+
+.waiting-pill {
+    flex-shrink: 0;
+    margin-left: 12upx;
+    padding: 8upx 16upx;
+    background: #fff7e6;
+    border: 1px solid #ffd591;
+    border-radius: 8upx;
+    font-size: 22upx;
+    color: #d48806;
 }
 </style>

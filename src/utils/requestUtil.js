@@ -1,10 +1,12 @@
 import Request from '@/js_sdk/luch-request/request.js'
 import { CHAT_BASE_URL, BUSINESS_LINE } from '@/utils/appConfig.js'
 import { myLog } from '@/utils/log.js'
+import { stopWorkbenchPoller } from '@/api/chat/conversation-workbench-poller.js'
 
 const http = new Request()
 
 function handleUnauthorized() {
+  stopWorkbenchPoller()
   uni.removeStorageSync('token')
   uni.removeStorageSync('userInfo')
   uni.showModal({
@@ -45,16 +47,10 @@ http.validateStatus = (statusCode) => {
 
 http.interceptor.request((config, cancel) => { /* 请求之前拦截器 */ 
   const token = uni.getStorageSync('token') // 使用 token 作为 key
-  if (token) {
-    config.header = {
-      Authorization: token,
-      ...(BUSINESS_LINE ? { 'X-Business-Line': BUSINESS_LINE } : {}),
-      ...config.header,
-    }
-  } else {
-    config.header = {
-      ...config.header,
-    }
+  config.header = {
+    ...(BUSINESS_LINE ? { businessLine: BUSINESS_LINE } : {}),
+    ...(token ? { Authorization: token } : {}),
+    ...config.header,
   }
   /*
 	if (!token) { // 如果token不存在，调用cancel 会取消本次请求，但是该函数的catch() 仍会执行

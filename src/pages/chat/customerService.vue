@@ -151,7 +151,9 @@ export default {
             // 底部判断容错值（单位：px），用于判断是否在聊天窗口底部
             // 值越大，判断越宽松（允许更多偏差）
             // 值越小，判断越严格（必须完全到底部）
-            bottomThreshold: 100 // 默认 100px 容错空间，可根据需要调整
+            bottomThreshold: 100, // 默认 100px 容错空间，可根据需要调整
+            isPageReady: false,
+            pendingCachedMessages: null
         };
     },
     async onLoad(options) {
@@ -186,7 +188,9 @@ export default {
         }
 
         // 从缓存读取消息（如果有，从"我的消息"进入时）
-        const cache = window.conversationCache?.[this.shopId];
+        // 缓存必须按 conversationId 隔离；客服侧同一个 shopId 下会有多个客户会话，
+        // 如果按 shopId 取缓存，会把其它聊天窗口的消息加载到当前窗口。
+        const cache = window.conversationCacheByConvId?.[this.conversationId];
         const cachedMessages = cache?.messages || [];
 
         // 从缓存获取 shopId（如果URL参数中没有，但缓存中有）
@@ -218,7 +222,8 @@ export default {
         // 显示管理器则是有跳号检测，不担心中间最新的消息之间有跳号
         if (cachedMessages.length > 0) {
             console.log('从缓存加载消息，数量:', cachedMessages.length);
-            this.chatManager.messageDisplayManager.applyOneMessages(cachedMessages);
+            // 不在 onLoad 立即 applyOneMessages：此时 .message-list 尚未挂载，会触发 checkIsAtBottom / 强制刷新空引用；延后到 onReady（见 flushPendingCachedMessages）
+            this.pendingCachedMessages = cachedMessages;
         }
 
         // 初始化已读状态管理器
@@ -228,6 +233,9 @@ export default {
         this.initIntersectionObserver();
     },
     onReady() {
+        this.isPageReady = true;
+        this.flushPendingCachedMessages();
+
         // 计算聊天滚动区上下边界
         try {
             const q3 = uni.createSelectorQuery().in(this);
@@ -291,6 +299,9 @@ export default {
         }
     },
     onUnload() {
+        this.isPageReady = false;
+        this.pendingCachedMessages = null;
+
         // 断开 Intersection Observer
         if (this.intersectionObserver) {
             this.intersectionObserver.disconnect();
@@ -301,6 +312,17 @@ export default {
         // 全局单例策略：不在页面卸载时销毁，保持长连接
     },
     methods: {
+        flushPendingCachedMessages() {
+            if (!this.isPageReady || !this.pendingCachedMessages?.length) {
+                return;
+            }
+            if (!this.chatManager?.messageDisplayManager) {
+                return;
+            }
+            this.chatManager.messageDisplayManager.applyOneMessages(this.pendingCachedMessages);
+            this.pendingCachedMessages = null;
+        },
+
         // 清理URL中的商品参数，防止刷新后再次弹出浮窗
         clearProductQueryParams() {
             if (typeof window === 'undefined') {
@@ -598,6 +620,15 @@ export default {
         // 处理接收到的消息
         // 这是Vue页面的消息分发器，接收来自ChatManager的回调
         handleMessageReceived(data) {
+            console.log('[CS_SEND_TRACE] vue handleMessageReceived', {
+                interface: data && data.interface,
+                isPageReady: this.isPageReady,
+                messagesUpdateKey: this.messagesUpdateKey,
+                hasChatManager: !!this.chatManager,
+                visibleCount: this.chatManager?.messageDisplayManager?.visibleMessages?.length,
+                pendingCount: this.chatManager?.messageDisplayManager?.pendingMessages?.length,
+                allAckedCount: this.chatManager?.messageDisplayManager?.allAckedMessages?.length
+            });
             console.log('收到消息:', data);
 
             // 处理分页拉取消息的响应
@@ -648,18 +679,58 @@ export default {
         // 现在 finalRealDisplayMessages 是计算属性，直接从 MessageDisplayManager.visibleMessages 读取
         // 所以这里只需要更新加载状态即可
         handleMessagesUpdate(payload) {
+            console.log('[CS_SEND_TRACE] vue handleMessagesUpdate enter', {
+                isPageReady: this.isPageReady,
+                payloadVisibleCount: payload?.visibleMessages?.length,
+                payloadPendingClientMsgIds: payload?.visibleMessages?.filter(msg => msg?.status === 'sending' || msg?.status === 'retrying')?.map(msg => msg.clientMsgId),
+                messagesUpdateKeyBefore: this.messagesUpdateKey,
+                managerVisibleCount: this.chatManager?.messageDisplayManager?.visibleMessages?.length,
+                managerPendingCount: this.chatManager?.messageDisplayManager?.pendingMessages?.length,
+                finalDisplayCount: this.finalRealDisplayMessages?.length
+            });
+
+            if (!this.isPageReady) {
+                // 页面 DOM 未就绪：仅递增 key 与加载状态，不查滚动、不 $forceUpdate
+                if (payload) {
+                    if (typeof payload.isLoadingMore !== 'undefined') {
+                        this.isLoadingMore = payload.isLoadingMore;
+                    }
+                    if (typeof payload.hasMoreHistory !== 'undefined') {
+                        this.hasMoreHistory = payload.hasMoreHistory;
+                    }
+                }
+                this.messagesUpdateKey++;
+                console.log('[CS_SEND_TRACE] vue handleMessagesUpdate skipped not ready', {
+                    messagesUpdateKeyAfter: this.messagesUpdateKey,
+                    managerVisibleCount: this.chatManager?.messageDisplayManager?.visibleMessages?.length,
+                    finalDisplayCount: this.finalRealDisplayMessages?.length
+                });
+                return;
+            }
+
             // 在消息更新前，先判断是否在底部（因为更新后 scrollHeight 会增加，判断会不准确）
             // 保存这个状态，用于后续新消息到达时的滚动判断
             this.checkIsAtBottom().then(isAtBottom => {
                 this.wasAtBottomBeforeUpdate = isAtBottom;
+            }).catch(() => {
+                this.wasAtBottomBeforeUpdate = false;
             });
 
             // 递增 messagesUpdateKey 以触发计算属性重新计算
             // visibleMessages 不是 Vue 响应式数据，通过这种方式确保 Vue 能检测到变化
             this.messagesUpdateKey++;
+            this.$nextTick(() => {
+                console.log('[CS_SEND_TRACE] vue handleMessagesUpdate nextTick', {
+                    messagesUpdateKeyAfter: this.messagesUpdateKey,
+                    managerVisibleCount: this.chatManager?.messageDisplayManager?.visibleMessages?.length,
+                    managerPendingCount: this.chatManager?.messageDisplayManager?.pendingMessages?.length,
+                    finalDisplayCount: this.finalRealDisplayMessages?.length,
+                    lastClientMsgId: this.finalRealDisplayMessages?.[this.finalRealDisplayMessages.length - 1]?.clientMsgId,
+                    lastStatus: this.finalRealDisplayMessages?.[this.finalRealDisplayMessages.length - 1]?.status
+                });
+            });
 
-            // 立即强制更新，因为 messagesUpdateKey++ 已经触发了计算属性的重新计算
-            this.$forceUpdate();
+            // 不再调用 $forceUpdate：messagesUpdateKey 已触发计算属性重算；onLoad/onReady 竞态下 forceUpdate 可能报 dirty null
 
             console.log('消息显示更新:', payload);
             // 消息数据已通过计算属性finalRealDisplayMessages自动从visibleMessages读取，无需手动合并
@@ -704,6 +775,17 @@ export default {
             }
 
             const content = this.inputMessage;
+            console.log('[CS_SEND_TRACE] vue sendMessage click', {
+                isPageReady: this.isPageReady,
+                hasChatManager: !!this.chatManager,
+                hasMessageDisplayManager: !!this.chatManager?.messageDisplayManager,
+                conversationId: this.conversationId,
+                shopId: this.shopId,
+                inputLength: content.trim().length,
+                managerVisibleCount: this.chatManager?.messageDisplayManager?.visibleMessages?.length,
+                managerPendingCount: this.chatManager?.messageDisplayManager?.pendingMessages?.length,
+                finalDisplayCount: this.finalRealDisplayMessages?.length
+            });
             this.inputMessage = ''; // 清空输入框
             // 立即保持/恢复输入框焦点（通过受控 focus 属性更稳定）
             this.shouldFocusInput = false;
@@ -727,6 +809,12 @@ export default {
             // 通过ChatManager发送消息
             // ChatManager 会自动添加到 pendingMessages，finalRealDisplayMessages 是计算属性会自动更新
             const result = this.chatManager.sendTextMessage(content);
+            console.log('[CS_SEND_TRACE] vue sendMessage result', {
+                result,
+                managerVisibleCount: this.chatManager?.messageDisplayManager?.visibleMessages?.length,
+                managerPendingCount: this.chatManager?.messageDisplayManager?.pendingMessages?.length,
+                finalDisplayCount: this.finalRealDisplayMessages?.length
+            });
 
             if (result.success) {
                 // 发送后自动滚动到最新消息（强制）
@@ -808,57 +896,69 @@ export default {
         // 检查是否在底部（主动查询）
         // 返回 Promise，使用 resolve 返回结果
         checkIsAtBottom() {
+            if (!this.isPageReady) {
+                return Promise.resolve(false);
+            }
+
             // 创建 Promise，resolve 是 Promise 构造函数传入的回调函数
             // resolve(value) 的作用：将 value 作为 Promise 的成功结果返回给调用者
             // 调用者通过 .then(result => {...}) 接收这个值
             return new Promise((resolve) => {
-                const query = uni.createSelectorQuery().in(this);
+                try {
+                    const query = uni.createSelectorQuery().in(this);
 
-                // 对同一个元素分别添加 scrollOffset 和 boundingClientRect 查询
-                const nodeQuery = query.select('.message-list');
-                nodeQuery.scrollOffset();
-                nodeQuery.boundingClientRect();
+                    // 对同一个元素分别添加 scrollOffset 和 boundingClientRect 查询
+                    const nodeQuery = query.select('.message-list');
+                    nodeQuery.scrollOffset();
+                    nodeQuery.boundingClientRect();
 
-                query.exec((res) => {
-                    // res[0] 是 scrollOffset 的结果
-                    // res[1] 是 boundingClientRect 的结果
-                    if (!res || res.length < 2) {
-                        resolve(false);  // resolve(false) 表示 Promise 成功完成，返回 false
-                        return;
-                    }
+                    query.exec((res) => {
+                        try {
+                            // res[0] 是 scrollOffset 的结果
+                            // res[1] 是 boundingClientRect 的结果
+                            if (!res || res.length < 2) {
+                                resolve(false);  // resolve(false) 表示 Promise 成功完成，返回 false
+                                return;
+                            }
 
-                    const scrollRes = res[0];
-                    const rect = res[1];
+                            const scrollRes = res[0];
+                            const rect = res[1];
 
-                    if (!scrollRes || !rect) {
-                        resolve(false);  // resolve(false) 表示 Promise 成功完成，返回 false
-                        return;
-                    }
+                            if (!scrollRes || !rect) {
+                                resolve(false);  // resolve(false) 表示 Promise 成功完成，返回 false
+                                return;
+                            }
 
-                    const scrollTop = scrollRes.scrollTop || 0;
-                    const scrollHeight = scrollRes.scrollHeight || 0;
-                    const clientHeight = rect.height || 0;
+                            const scrollTop = scrollRes.scrollTop || 0;
+                            const scrollHeight = scrollRes.scrollHeight || 0;
+                            const clientHeight = rect.height || 0;
 
-                    // 判断是否在底部（留一些容错空间）
-                    // 使用可配置的容错值，允许一定偏差
-                    const isAtBottom = scrollTop + clientHeight >= scrollHeight - this.bottomThreshold;
+                            // 判断是否在底部（留一些容错空间）
+                            // 使用可配置的容错值，允许一定偏差
+                            const isAtBottom = scrollTop + clientHeight >= scrollHeight - this.bottomThreshold;
 
-                    // console.log('[checkIsAtBottom] 滚动位置检查:', {
-                    //     scrollTop,
-                    //     scrollHeight,
-                    //     clientHeight,
-                    //     isAtBottom,
-                    //     calculation: `${scrollTop} + ${clientHeight} >= ${scrollHeight} - 50`,
-                    //     result: scrollTop + clientHeight,
-                    //     threshold: scrollHeight - 50
-                    // });
+                            // console.log('[checkIsAtBottom] 滚动位置检查:', {
+                            //     scrollTop,
+                            //     scrollHeight,
+                            //     clientHeight,
+                            //     isAtBottom,
+                            //     calculation: `${scrollTop} + ${clientHeight} >= ${scrollHeight} - 50`,
+                            //     result: scrollTop + clientHeight,
+                            //     threshold: scrollHeight - 50
+                            // });
 
-                    // resolve(isAtBottom) 的作用：
-                    // 1. 表示 Promise 成功完成
-                    // 2. 将 isAtBottom 的值返回给调用者
-                    // 3. 调用者通过 .then(isAtBottom => {...}) 接收这个值
-                    resolve(isAtBottom);
-                });
+                            // resolve(isAtBottom) 的作用：
+                            // 1. 表示 Promise 成功完成
+                            // 2. 将 isAtBottom 的值返回给调用者
+                            // 3. 调用者通过 .then(isAtBottom => {...}) 接收这个值
+                            resolve(isAtBottom);
+                        } catch (e) {
+                            resolve(false);
+                        }
+                    });
+                } catch (e) {
+                    resolve(false);
+                }
             });
         },
 

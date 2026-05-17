@@ -8,6 +8,8 @@ import {
 } from 'vuex';
 import { myLog } from '@/utils/log.js';
 import { getShopChatManager } from '@/api/chat/shop-chat-manager.js';
+// 登录后/回前台：启动消息工作台 HTTP 轮询（15s 拉 list）；进后台：停止
+import { startWorkbenchPoller, stopWorkbenchPoller } from '@/api/chat/conversation-workbench-poller.js';
 
 export default {
 	methods: {
@@ -24,13 +26,14 @@ export default {
 		
 		// 判断本地是否有用户登录信息（userInfo对象中有id属性且为真）
 		// userInfo.id 通常代表用户唯一标识，只有已登录用户才会有id
-		if (token && userInfo && userInfo.id) {
+		if (token && userInfo && (userInfo.agentId || userInfo.id)) {
 			//读取userInfo去更新登录状态
 			this.login({
 				userInfo: userInfo,
 				token: token,
 				roles: userInfo.roles || []
 			}) // 调用Vuex mutation更新登录状态
+			startWorkbenchPoller()
 		}
 
 	},
@@ -45,6 +48,9 @@ export default {
 		 */
 		// 应用显示时执行
 		myLog("info", 'App Show');
+		if (uni.getStorageSync('token')) {
+			startWorkbenchPoller()
+		}
 	},
 	onHide: function () {
 		/**
@@ -56,6 +62,7 @@ export default {
 		 */
 		// 应用隐藏时执行
 		myLog("info", 'App Hide');
+		stopWorkbenchPoller()
 	},
 	onExit: function () {
 		myLog("info", 'App Exit - Cleaning up shop chat managers');

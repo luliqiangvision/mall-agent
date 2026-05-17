@@ -1,6 +1,8 @@
 import { createStore } from 'vuex'
 import { myLog } from '@/utils/log.js'
 import { login, logout, getInfo } from '@/api/login.js'
+// 登录启动、登出停止：消息工作台 list 定时 HTTP 轮询
+import { startWorkbenchPoller, stopWorkbenchPoller } from '@/api/chat/conversation-workbench-poller.js'
 
 // store/index.js - Vuex 状态管理，管理全局应用状态
 const store = createStore({
@@ -35,6 +37,7 @@ const store = createStore({
       state.roles = []
       uni.removeStorageSync('userInfo')
       uni.removeStorageSync('token')
+      stopWorkbenchPoller()
       state.authVersion++
       myLog('info', '登出成功')
     },
@@ -125,6 +128,7 @@ const store = createStore({
               hasIcon: !!userInfoData.icon
             })
             
+            startWorkbenchPoller()
             resolve()
           }).catch(infoError => {
             myLog('error', '获取用户信息失败', infoError)

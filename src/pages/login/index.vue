@@ -128,8 +128,8 @@ export default {
 						myLog('debug', '收到获取聊天窗口列表响应:', data)
 						if (data.interface === '/getChatWindowList' && data.payload.success) {
 							// 初始化缓存对象
-							if (!window.conversationCache) {
-								window.conversationCache = {}
+							if (!window.conversationCacheByConvId) {
+								window.conversationCacheByConvId = {}
 							}
 
 							// 初始化未读数管理器（单例）
@@ -148,7 +148,8 @@ export default {
 								const shopId = shop.shopId
 								const messages = viewData.messages || []  // 所有消息（不仅是未读的）
 
-								// 缓存消息数据到 window.conversationCache（供后续聊天窗口使用）
+								// 缓存消息数据到 window.conversationCacheByConvId（供后续聊天窗口使用）。
+								// 必须按 conversationId 隔离，避免同 shopId 多会话互相覆盖。
 								if (shopId) {
 									// 计算 clientMaxServerMsgId
 									let clientMaxServerMsgId = 0
@@ -157,10 +158,13 @@ export default {
 										clientMaxServerMsgId = latestMsg.serverMsgId || 0
 									}
 
-									window.conversationCache[shopId] = {
+									// 缓存必须按 conversationId 隔离；同一个 shopId 可能对应多个客户会话。
+									// 用 shopId 做 key 会覆盖其它窗口，导致不同聊天窗口串消息。
+									window.conversationCacheByConvId[conversationId] = {
 										conversationId: conversationId,
 										messages: messages,  // 存储所有返回的消息数据
 										clientMaxServerMsgId: clientMaxServerMsgId,
+										shopId: shopId,
 										shopInfo: shop  // 缓存店铺信息
 									}
 									myLog('debug', `缓存店铺 ${shopId} 的消息，数量:`, messages.length, 'clientMaxServerMsgId:', clientMaxServerMsgId)
@@ -175,7 +179,7 @@ export default {
 							// 立即更新 tabBar badge，让用户看到未读消息红点
 							this.updateTabBarBadge(totalUnread)
 
-							myLog('debug', '已将消息存储到 conversationCache')
+							myLog('debug', '已将消息按 conversationId 存储到 conversationCacheByConvId')
 							myLog('debug', '已将未读数存储到 unreadCountManager')
 						}
 					},

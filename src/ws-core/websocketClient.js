@@ -1,4 +1,4 @@
-import { CHAT_BASE_URL } from '@/utils/appConfig.js'
+import { CHAT_BASE_URL, BUSINESS_LINE } from '@/utils/appConfig.js'
 import { myLog } from '@/utils/log.js'
 import MethodHandleMapper from './methodHandleMapper.js'
 
@@ -180,10 +180,13 @@ class WebSocketClient {
     // 如果遇到 1002 Protocol error，可能需要让服务器端也支持 URL 参数方式
     // 或者统一使用 Header 方式（需要服务器端支持）
     
+    const businessLineQuery = BUSINESS_LINE
+      ? `&businessLine=${encodeURIComponent(BUSINESS_LINE)}`
+      : ''
+
     if (isWebPlatform) {
-      // Web 浏览器：token 放 URL 参数（浏览器 WebSocket 不支持自定义 Header）
-      // 如果服务器不支持 URL 参数方式，可能需要使用 wss:// 或者让服务器端支持 URL 参数
-      this.url = `${this.baseUrl}?token=${encodeURIComponent(tokenValue)}`
+      // Web 浏览器：token、businessLine 放 URL（浏览器 WebSocket 不支持自定义 Header）
+      this.url = `${this.baseUrl}?token=${encodeURIComponent(tokenValue)}${businessLineQuery}`
       connectOptions = {
         url: this.url
       }
@@ -205,7 +208,8 @@ class WebSocketClient {
       connectOptions = {
         url: this.url,
         header: {
-          'Authorization': authHeader
+          'Authorization': authHeader,
+          ...(BUSINESS_LINE ? { businessLine: BUSINESS_LINE } : {})
         }
       }
       myLog('info', `🔌 [${systemInfo.uniPlatform}] 准备连接 WebSocket: ${this.url}`)
