@@ -403,33 +403,13 @@ class MessageDisplayManager {
    * @param {Array} messages - 消息数组
    */
   displayMessages(messages) {
-    console.log('[CS_SEND_TRACE] displayMessages enter', {
-      inputCount: Array.isArray(messages) ? messages.length : 0,
-      inputClientMsgIds: Array.isArray(messages) ? messages.map(msg => msg?.clientMsgId).filter(Boolean) : [],
-      allAckedCountBefore: this.allAckedMessages.length,
-      pendingCountBefore: this.pendingMessages.length,
-      visibleCountBefore: this.visibleMessages.length
-    })
-
     // 安全合并到所有消息列表（去重）并全量排序，保证展示顺序稳定
     this.allAckedMessages = this.safeMergeMessages(this.allAckedMessages, messages)
     sortMessagesInPlace(this.allAckedMessages)
     // 计算可见消息
     this.calculateVisibleMessages()
-    console.log('[CS_SEND_TRACE] displayMessages calculated', {
-      allAckedCountAfter: this.allAckedMessages.length,
-      pendingCountAfter: this.pendingMessages.length,
-      visibleCountAfter: this.visibleMessages.length,
-      visibleClientMsgIds: this.visibleMessages.map(msg => msg?.clientMsgId).filter(Boolean).slice(-5)
-    })
-
     // 通知消息更新
     if (this.onMessagesUpdate) {
-      console.log('[CS_SEND_TRACE] displayMessages notify ui', {
-        visibleCount: this.visibleMessages.length,
-        pendingCount: this.pendingMessages.length,
-        allAckedCount: this.allAckedMessages.length
-      })
       this.onMessagesUpdate({
         allAckedMessages: this.allAckedMessages,
         visibleMessages: this.visibleMessages,
@@ -542,14 +522,6 @@ class MessageDisplayManager {
    * @param {Object} message - 临时消息对象（无serverMsgId）
    */
   addPendingMessage(message) {
-    console.log('[CS_SEND_TRACE] addPendingMessage enter', {
-      clientMsgId: message?.clientMsgId,
-      status: message?.status,
-      pendingCountBefore: this.pendingMessages.length,
-      visibleCountBefore: this.visibleMessages.length,
-      allAckedCountBefore: this.allAckedMessages.length
-    })
-
     if (!message || !message.clientMsgId) {
       myLog('warn', 'Cannot add pending message: missing clientMsgId', message)
       return
@@ -569,21 +541,7 @@ class MessageDisplayManager {
     
     // 重新计算可见消息并通知更新
     this.calculateVisibleMessages()
-    console.log('[CS_SEND_TRACE] addPendingMessage calculated', {
-      clientMsgId: message.clientMsgId,
-      pendingCountAfter: this.pendingMessages.length,
-      visibleCountAfter: this.visibleMessages.length,
-      allAckedCountAfter: this.allAckedMessages.length,
-      visibleClientMsgIds: this.visibleMessages.map(msg => msg?.clientMsgId).filter(Boolean).slice(-5)
-    })
-
     if (this.onMessagesUpdate) {
-      console.log('[CS_SEND_TRACE] addPendingMessage notify ui', {
-        clientMsgId: message.clientMsgId,
-        visibleCount: this.visibleMessages.length,
-        pendingCount: this.pendingMessages.length,
-        allAckedCount: this.allAckedMessages.length
-      })
       this.onMessagesUpdate({
         allAckedMessages: this.allAckedMessages,
         visibleMessages: this.visibleMessages,

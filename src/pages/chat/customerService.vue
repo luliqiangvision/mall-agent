@@ -620,15 +620,6 @@ export default {
         // 处理接收到的消息
         // 这是Vue页面的消息分发器，接收来自ChatManager的回调
         handleMessageReceived(data) {
-            console.log('[CS_SEND_TRACE] vue handleMessageReceived', {
-                interface: data && data.interface,
-                isPageReady: this.isPageReady,
-                messagesUpdateKey: this.messagesUpdateKey,
-                hasChatManager: !!this.chatManager,
-                visibleCount: this.chatManager?.messageDisplayManager?.visibleMessages?.length,
-                pendingCount: this.chatManager?.messageDisplayManager?.pendingMessages?.length,
-                allAckedCount: this.chatManager?.messageDisplayManager?.allAckedMessages?.length
-            });
             console.log('收到消息:', data);
 
             // 处理分页拉取消息的响应
@@ -679,16 +670,6 @@ export default {
         // 现在 finalRealDisplayMessages 是计算属性，直接从 MessageDisplayManager.visibleMessages 读取
         // 所以这里只需要更新加载状态即可
         handleMessagesUpdate(payload) {
-            console.log('[CS_SEND_TRACE] vue handleMessagesUpdate enter', {
-                isPageReady: this.isPageReady,
-                payloadVisibleCount: payload?.visibleMessages?.length,
-                payloadPendingClientMsgIds: payload?.visibleMessages?.filter(msg => msg?.status === 'sending' || msg?.status === 'retrying')?.map(msg => msg.clientMsgId),
-                messagesUpdateKeyBefore: this.messagesUpdateKey,
-                managerVisibleCount: this.chatManager?.messageDisplayManager?.visibleMessages?.length,
-                managerPendingCount: this.chatManager?.messageDisplayManager?.pendingMessages?.length,
-                finalDisplayCount: this.finalRealDisplayMessages?.length
-            });
-
             if (!this.isPageReady) {
                 // 页面 DOM 未就绪：仅递增 key 与加载状态，不查滚动、不 $forceUpdate
                 if (payload) {
@@ -700,11 +681,6 @@ export default {
                     }
                 }
                 this.messagesUpdateKey++;
-                console.log('[CS_SEND_TRACE] vue handleMessagesUpdate skipped not ready', {
-                    messagesUpdateKeyAfter: this.messagesUpdateKey,
-                    managerVisibleCount: this.chatManager?.messageDisplayManager?.visibleMessages?.length,
-                    finalDisplayCount: this.finalRealDisplayMessages?.length
-                });
                 return;
             }
 
@@ -719,17 +695,6 @@ export default {
             // 递增 messagesUpdateKey 以触发计算属性重新计算
             // visibleMessages 不是 Vue 响应式数据，通过这种方式确保 Vue 能检测到变化
             this.messagesUpdateKey++;
-            this.$nextTick(() => {
-                console.log('[CS_SEND_TRACE] vue handleMessagesUpdate nextTick', {
-                    messagesUpdateKeyAfter: this.messagesUpdateKey,
-                    managerVisibleCount: this.chatManager?.messageDisplayManager?.visibleMessages?.length,
-                    managerPendingCount: this.chatManager?.messageDisplayManager?.pendingMessages?.length,
-                    finalDisplayCount: this.finalRealDisplayMessages?.length,
-                    lastClientMsgId: this.finalRealDisplayMessages?.[this.finalRealDisplayMessages.length - 1]?.clientMsgId,
-                    lastStatus: this.finalRealDisplayMessages?.[this.finalRealDisplayMessages.length - 1]?.status
-                });
-            });
-
             // 不再调用 $forceUpdate：messagesUpdateKey 已触发计算属性重算；onLoad/onReady 竞态下 forceUpdate 可能报 dirty null
 
             console.log('消息显示更新:', payload);
@@ -775,17 +740,6 @@ export default {
             }
 
             const content = this.inputMessage;
-            console.log('[CS_SEND_TRACE] vue sendMessage click', {
-                isPageReady: this.isPageReady,
-                hasChatManager: !!this.chatManager,
-                hasMessageDisplayManager: !!this.chatManager?.messageDisplayManager,
-                conversationId: this.conversationId,
-                shopId: this.shopId,
-                inputLength: content.trim().length,
-                managerVisibleCount: this.chatManager?.messageDisplayManager?.visibleMessages?.length,
-                managerPendingCount: this.chatManager?.messageDisplayManager?.pendingMessages?.length,
-                finalDisplayCount: this.finalRealDisplayMessages?.length
-            });
             this.inputMessage = ''; // 清空输入框
             // 立即保持/恢复输入框焦点（通过受控 focus 属性更稳定）
             this.shouldFocusInput = false;
@@ -809,13 +763,6 @@ export default {
             // 通过ChatManager发送消息
             // ChatManager 会自动添加到 pendingMessages，finalRealDisplayMessages 是计算属性会自动更新
             const result = this.chatManager.sendTextMessage(content);
-            console.log('[CS_SEND_TRACE] vue sendMessage result', {
-                result,
-                managerVisibleCount: this.chatManager?.messageDisplayManager?.visibleMessages?.length,
-                managerPendingCount: this.chatManager?.messageDisplayManager?.pendingMessages?.length,
-                finalDisplayCount: this.finalRealDisplayMessages?.length
-            });
-
             if (result.success) {
                 // 发送后自动滚动到最新消息（强制）
                 this.scrollToLatest(true);

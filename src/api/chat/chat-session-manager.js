@@ -269,19 +269,6 @@ class ChatSessionManager {
         return;
       }
 
-      console.log("[CS_SEND_TRACE] reply received", {
-        clientMsgId,
-        conversationId: this.conversationId,
-        payloadConversationId: payload.conversationId,
-        websocketCode: message.websocketCode,
-        success: message.success,
-        serverMsgId: payload.serverMsgId,
-        hasSentMessage: this.sentMessages.has(clientMsgId),
-        sentMessagesSize: this.sentMessages.size,
-        pendingCount: this.messageDisplayManager?.pendingMessages?.length,
-        visibleCount: this.messageDisplayManager?.visibleMessages?.length,
-      });
-
       // 已收到服务端回执：清理超时定时器（避免 UI 一直转圈）
       const timerId = this.messageTimeoutMap.get(clientMsgId);
       if (timerId) {
@@ -312,13 +299,6 @@ class ChatSessionManager {
             };
             // 添加到MessageDisplayManager的allAckedMessages（它会自动去重、排序、更新UI）
             this.messageDisplayManager.applyOneMessages(messageToAdd);
-            console.log("[CS_SEND_TRACE] reply applied to display manager", {
-              clientMsgId,
-              serverMsgId: num,
-              pendingCount: this.messageDisplayManager?.pendingMessages?.length,
-              visibleCount: this.messageDisplayManager?.visibleMessages?.length,
-              allAckedCount: this.messageDisplayManager?.allAckedMessages?.length,
-            });
             myLog(
               "info",
               "Sent message added to MessageDisplayManager allAckedMessages",
@@ -816,17 +796,6 @@ class ChatSessionManager {
    * @returns {Object} - 返回消息对象，包含clientMsgId
    */
   sendTextMessage(content, options = {}) {
-    console.log("[CS_SEND_TRACE] sendTextMessage enter", {
-      conversationId: this.conversationId,
-      shopId: this.shopId,
-      connected: this.isConnected(),
-      hasWsConnection: !!this.wsConnection,
-      hasMessageDisplayManager: !!this.messageDisplayManager,
-      contentLength: content ? content.trim().length : 0,
-      pendingCount: this.messageDisplayManager?.pendingMessages?.length,
-      visibleCount: this.messageDisplayManager?.visibleMessages?.length,
-    });
-
     // 若未连接：立即触发一次手动重连，交由上层决定何时再次调用发送
     if (!this.isConnected() && this.wsConnection) {
       // 因为进入聊天接口就已经去建立连接了，所以发送消息的时候，如果不是连接状态，重连的操作是正确的
@@ -868,17 +837,6 @@ class ChatSessionManager {
 
     // 发送消息
     const sent = this.wsConnection.send(msgData);
-    console.log("[CS_SEND_TRACE] websocket send result", {
-      clientMsgId,
-      conversationId: this.conversationId,
-      sent,
-      interfaceName: msgData.interfaceName,
-      fromUserId: msgData.payload.fromUserId,
-      fromUserNo: msgData.payload.fromUserNo,
-      senderId: msgData.payload.senderId,
-      senderNo: msgData.payload.senderNo,
-    });
-
     if (sent) {
       // 存储消息内容，用于发送成功后添加到MessageDisplayManager
       const messageData = {
@@ -892,24 +850,12 @@ class ChatSessionManager {
         status: "sending",
       };
       this.sentMessages.set(clientMsgId, messageData);
-      console.log("[CS_SEND_TRACE] sent message stored", {
-        clientMsgId,
-        sentMessagesSize: this.sentMessages.size,
-        pendingCountBeforeAdd: this.messageDisplayManager?.pendingMessages?.length,
-        visibleCountBeforeAdd: this.messageDisplayManager?.visibleMessages?.length,
-      });
-
       // 添加到MessageDisplayManager的pendingMessages（用于显示和管理临时消息状态）
       if (this.messageDisplayManager) {
         // 格式化消息（补齐type、time等字段）
         const formattedMessage = this.messageDisplayManager.formatMessages(messageData)[0]
         if (formattedMessage) {
           this.messageDisplayManager.addPendingMessage(formattedMessage)
-          console.log("[CS_SEND_TRACE] pending message added", {
-            clientMsgId,
-            pendingCountAfterAdd: this.messageDisplayManager?.pendingMessages?.length,
-            visibleCountAfterAdd: this.messageDisplayManager?.visibleMessages?.length,
-          });
           myLog('debug', 'Added message to pendingMessages', { clientMsgId })
         }
       }
