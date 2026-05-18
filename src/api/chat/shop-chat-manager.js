@@ -11,10 +11,11 @@ import { myLog } from '@/utils/log.js'
  * - 支持同一个店铺的不同客户咨询（不同 conversationId）同时存在多个实例
  * 
  * 设计原则：
- * 1. 每个 shopId + conversationId 组合对应一个 ChatSessionManager 实例
- * 2. 长生命周期：只在彻底关闭小程序时回收
- * 3. 页面切换时复用同一个实例（基于相同的 shopId 和 conversationId）
- * 4. 全局单例，避免重复创建
+ * 1. 有 shopId 时：shopId + conversationId 组合对应一个 ChatSessionManager 实例
+ * 2. 公司级（无 shopId）时：仅 conversationId 对应一个实例（key 前缀 corp:）
+ * 3. 长生命周期：只在彻底关闭小程序时回收
+ * 4. 页面切换时复用同一个实例（基于相同的 shopId 和 conversationId）
+ * 5. 全局单例，避免重复创建
  * 
  * 使用场景：
  * - 客服在店铺A与客户1（conversationId1）聊天 → 创建 shopA_conversationId1 的实例
@@ -31,15 +32,22 @@ class ShopChatManager {
   }
   
   /**
-   * 生成会话 key（shopId + conversationId 组合）
-   * @param {String} shopId - 店铺ID
+   * 生成会话 key
+   * - 有 shopId：${shopId}_${conversationId}
+   * - 无 shopId（公司级）：corp:${conversationId}
+   * @param {String} shopId - 店铺ID（公司级可为空）
    * @param {String} conversationId - 会话ID
-   * @returns {String} 会话 key
+   * @returns {String|null} 会话 key
    */
   generateSessionKey(shopId, conversationId) {
-    if (!shopId) return null
-    if (!conversationId) return shopId // 如果没有 conversationId，仅使用 shopId（向后兼容）
-    return `${shopId}_${conversationId}`
+    if (!conversationId) {
+      if (!shopId) return null
+      return shopId // 如果没有 conversationId，仅使用 shopId（向后兼容）
+    }
+    if (shopId) {
+      return `${shopId}_${conversationId}`
+    }
+    return `corp:${conversationId}`
   }
   
   /**
@@ -50,18 +58,22 @@ class ShopChatManager {
   getOrCreateShopSession(options) {
     const { shopId, conversationId, ...chatOptions } = options
     
-    if (!shopId) {
-      myLog('error', 'No shopId provided')
-      return null
-    }
-    
     if (!conversationId) {
       myLog('error', 'No conversationId provided')
       return null
     }
-    
-    // 生成会话 key（shopId + conversationId 组合）
+
+    if (!shopId) {
+      myLog('debug', 'Corporate conversation without shopId, using conversationId as session key', {
+        conversationId,
+      })
+    }
+
     const sessionKey = this.generateSessionKey(shopId, conversationId)
+    if (!sessionKey) {
+      myLog('error', 'Failed to generate session key', { shopId, conversationId })
+      return null
+    }
     
     // 检查是否已存在该店铺+会话的实例
     if (this.shopSessions.has(sessionKey)) {
@@ -95,7 +107,7 @@ class ShopChatManager {
     myLog('info', `Creating new session for shop ${shopId} and conversation ${conversationId}`, { sessionKey })
     
     const session = createChatSessionManager({
-      shopId,
+      shopId: shopId || null,
       conversationId,
       ...chatOptions
     })
@@ -117,10 +129,10 @@ class ShopChatManager {
    * @returns {Object|null} ChatSessionManager 实例或 null
    */
   getShopSession(shopId, conversationId) {
-    if (!shopId) return null
     if (!conversationId) return null
-    
+
     const sessionKey = this.generateSessionKey(shopId, conversationId)
+    if (!sessionKey) return null
     return this.shopSessions.get(sessionKey) || null
   }
   
@@ -130,9 +142,10 @@ class ShopChatManager {
    * @param {String} conversationId - 会话ID
    */
   destroyShopSession(shopId, conversationId) {
-    if (!shopId || !conversationId) return
-    
+    if (!conversationId) return
+
     const sessionKey = this.generateSessionKey(shopId, conversationId)
+    if (!sessionKey) return
     const session = this.shopSessions.get(sessionKey)
     if (session) {
       myLog('info', `Destroying session for shop ${shopId} and conversation ${conversationId}`, { sessionKey })
@@ -199,14 +212,22 @@ class ShopChatManager {
    */
   getAllSessionsInfo() {
     return Array.from(this.shopSessions.entries()).map(([sessionKey, session]) => {
-      const [shopId, conversationId] = sessionKey.includes('_') 
-        ? sessionKey.split('_') 
-        : [sessionKey, null]
-      
+      let shopId = null
+      let conversationId = session.conversationId
+      if (sessionKey.startsWith('corp:')) {
+        conversationId = sessionKey.slice(5)
+      } else if (sessionKey.includes('_')) {
+        const idx = sessionKey.indexOf('_')
+        shopId = sessionKey.slice(0, idx)
+        conversationId = sessionKey.slice(idx + 1)
+      } else {
+        shopId = sessionKey
+      }
+
       return {
         sessionKey,
         shopId,
-        conversationId: conversationId || session.conversationId,
+        conversationId,
         isConnected: session.isConnected(),
         allAckedCount: session.messageDisplayManager?.allAckedMessages?.length || 0,
         pendingCount: session.messageDisplayManager?.pendingMessages?.length || 0

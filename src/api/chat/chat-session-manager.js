@@ -820,7 +820,7 @@ class ChatSessionManager {
       payload: {
         clientMsgId: clientMsgId,
         conversationId: this.conversationId,
-        shopId: this.shopId, // 店铺ID（客服端必需字段）
+        shopId: this.shopId, // 店铺会话必填；公司级无 shop 时为 null
         type: "text",
         fromUserId: uni.getStorageSync("userInfo")?.agentId,
         // 兼容升级：先占位，后续接入真实 agentNo
